@@ -31,7 +31,8 @@
           ]
         }
       ],
-      "category": "public.app-category.sports"
+      "category": "public.app-category.sports",
+      "artifactName": "MacTakip-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -41,12 +42,23 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "artifactName": "MacTakip-Setup-${version}.${ext}"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Maç Takip",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "icon": "build/icon.png"
   },
   "devDependencies": {
     "electron": "^44.5.1",
