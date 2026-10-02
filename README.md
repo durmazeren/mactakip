@@ -2,7 +2,20 @@
 
 Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde gösterir. Sağdaki "Şut ekranı" sadece seçili maçların toplam ve isabetli şutlarını yazar (her 10 sn'de güncellenir). Mac ve Windows'ta aynı şekilde çalışır.
 
-## Başlatma (repodan)
+## İndir (önerilen)
+
+**[Releases → son sürüm](https://github.com/durmazeren/mactakip/releases/latest)** sayfasından kurulum dosyasını indir. Node.js gerekmez.
+
+| Bilgisayar | Dosya |
+|---|---|
+| Windows | `MacTakip-Setup-x.y.z.exe`: çift tıkla, tek tıkla kurulur, masaüstüne **Maç Takip** simgesi gelir |
+| Mac (M1/M2/M3/M4) | `MacTakip-x.y.z-mac-arm64.dmg` |
+| Mac (Intel) | `MacTakip-x.y.z-mac-x64.dmg` |
+
+- **Windows:** SmartScreen uyarı verirse: "Ek bilgi" → "Yine de çalıştır".
+- **Mac:** Uygulamayı Uygulamalar klasörüne sürükle. "Hasarlı" veya "açılamıyor" derse Terminal'de bir kez `xattr -cr "/Applications/Mac Takip.app"`.
+
+## Kaynak koddan çalıştırma
 
 Tek gereksinim **Node.js** (LTS sürümü). Windows'ta yoksa `Baslat-Windows.bat` sorup otomatik kurar (winget ile); Mac'te https://nodejs.org adresinden kurulur.
 
@@ -23,8 +36,8 @@ Komut satırından: `npm install` ve ardından `npm start`.
 Node.js kurmadan dağıtmak için kurulum dosyası üret:
 
 ```bash
-npm run dist:win   # dist/Mac Takip Setup 1.0.0.exe
-npm run dist:mac   # dist/Mac Takip-1.0.0-arm64.dmg ve Intel için .dmg
+npm run dist:win   # dist/MacTakip-Setup-<sürüm>.exe
+npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 ```
 
 `.exe` Windows'ta veya Mac'te üretilebilir; `.dmg` sadece Mac'te. Uygulama imzasız olduğu için ilk açılışta yukarıdaki güvenlik uyarıları çıkar. Mac'te `.dmg` ile kurulan uygulama açılmazsa: Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç".
