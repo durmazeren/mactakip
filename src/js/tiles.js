@@ -12,7 +12,9 @@ function createTile(id) {
   const head = $('.tile-head', node);
   head.addEventListener('pointerdown', (e) => startDrag(e, tile));
   head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFocus(id); });
-  $('.resize-handle', node).addEventListener('pointerdown', (e) => startResize(e, tile));
+  for (const h of node.querySelectorAll('.rh')) {
+    h.addEventListener('pointerdown', (e) => startResize(e, tile, h.dataset.dir));
+  }
   tile.ro = new ResizeObserver(() => scheduleFit(tile));
   tile.ro.observe($('.stage', node));
   state.tiles.set(id, tile);
@@ -53,13 +55,16 @@ function setStage(tile, mode) {
 
   ph.hidden = true;
   const wv = document.createElement('webview');
-  wv.setAttribute('partition', PARTITION);
+  // Animasyonlar ortak oturumda (önbellek paylaşılır) ve sayfa içinden ölçeklenir.
+  // Atak grafiği boyutunu pencere genişliğinden hesapladığı için sayfa yakınlaştırması
+  // kullanır; yakınlaştırma oturum başına ortak olduğundan her grafiğe ayrı oturum.
+  wv.setAttribute('partition', mode === 'tracker' ? PARTITION : `momentum-${tile.id}`);
   wv.setAttribute('src', mode === 'tracker' ? TRACKER_URL(tile.id) : MOMENTUM_URL(tile.id));
   wv.addEventListener('dom-ready', () => {
     if (tile.webview !== wv) return;
     tile.ready = true;
-    // Eski sürümün sayfa yakınlaştırmasını sıfırla; boyutlandırma artık sayfa içinde (CSS zoom)
-    try { wv.setZoomFactor(1); } catch { /* yoksay */ }
+    // Eski sürümden kalmış olabilecek sayfa yakınlaştırmasını sıfırla
+    if (mode === 'tracker') { try { wv.setZoomFactor(1); } catch { /* yoksay */ } }
     wv.insertCSS(STAGE_CSS).catch(() => {});
     fitTile(tile);
   });
@@ -96,32 +101,42 @@ function scheduleFit(tile) {
   tile.fitTimer = setTimeout(() => fitTile(tile), 60);
 }
 
-/* İçeriği kutuya sığdırır. Her kutu kendi sayfasında CSS zoom ile ölçeklenir;
- * böylece odak/serbest modda farklı boyuttaki kutular birbirini etkilemez. */
+/* İçeriği kutuya sığdırır.
+ * Animasyon: kendi sayfasında CSS zoom ile ölçeklenir; odak/serbest modda farklı
+ * boyuttaki kutular birbirini etkilemez.
+ * Atak grafiği: ayrı oturumundaki sayfa yakınlaştırmasıyla ölçeklenir. */
 function fitTile(tile) {
   const wv = tile.webview;
   if (!wv || !wv.isConnected || !tile.ready) return;
   const stage = $('.stage', tile.el);
   const w = stage.clientWidth, h = stage.clientHeight;
   if (!w || !h) return;
-  const baseW = tile.mode === 'tracker' ? TRACKER_W : MOMENTUM_W;
-  wv.executeJavaScript(`(function (W, H, baseW) {
-    const de = document.documentElement;
-    const zc = parseFloat(de.style.zoom) || 1;
-    const lmt = document.querySelector('.widgets');
-    let ch = 0;
-    if (lmt) ch = lmt.offsetHeight;
-    else {
-      const chart = document.querySelector('.is-embed a');
-      if (chart) ch = chart.getBoundingClientRect().bottom / zc + 16;
-    }
-    if (ch < 50) return 0;
-    const z = Math.max(0.25, Math.min(2.5, Math.min(W / baseW, H / ch)));
-    if (Math.abs(z - zc) > 0.005) de.style.zoom = String(z);
-    // Animasyonu dikeyde ortala
-    if (lmt) lmt.style.marginTop = Math.max(0, (H / z - ch) / 2) + 'px';
-    return z;
-  })(${w}, ${h}, ${baseW})`).catch(() => { /* sayfa henüz hazır değil */ });
+
+  if (tile.mode === 'tracker') {
+    wv.executeJavaScript(`(function (W, H, baseW) {
+      const de = document.documentElement;
+      const zc = parseFloat(de.style.zoom) || 1;
+      const lmt = document.querySelector('.widgets');
+      if (!lmt) return 0;
+      const ch = lmt.offsetHeight;
+      if (ch < 50) return 0;
+      const z = Math.max(0.25, Math.min(2.5, Math.min(W / baseW, H / ch)));
+      if (Math.abs(z - zc) > 0.005) de.style.zoom = String(z);
+      // Animasyonu dikeyde ortala
+      lmt.style.marginTop = Math.max(0, (H / z - ch) / 2) + 'px';
+      return z;
+    })(${w}, ${h}, ${TRACKER_W})`).catch(() => { /* sayfa henüz hazır değil */ });
+    return;
+  }
+
+  wv.executeJavaScript(`(function () {
+    const chart = document.querySelector('.is-embed a');
+    return chart ? chart.getBoundingClientRect().bottom + 16 : 0;
+  })()`).then((ch) => {
+    if (tile.webview !== wv || ch < 50) return;
+    const z = Math.max(0.25, Math.min(2.5, Math.min(w / MOMENTUM_W, h / ch)));
+    if (Math.abs(wv.getZoomFactor() - z) > 0.01) wv.setZoomFactor(z);
+  }).catch(() => { /* sayfa henüz hazır değil */ });
 }
 
 function updateTile(id) {

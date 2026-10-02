@@ -18,6 +18,11 @@
       <button data-layout="grid" class="on">Izgara</button>
       <button data-layout="free">Serbest</button>
     </div>
+    <div class="seg" id="arrangeSeg" title="Izgara dizilimi">
+      <button data-arrange="auto" class="on" title="Animasyonları en büyük gösteren düzen">Oto</button>
+      <button data-arrange="row" title="Maçlar yan yana">Yan yana</button>
+      <button data-arrange="col" title="Maçlar alt alta">Alt alta</button>
+    </div>
     <button id="resetFree" class="btn btn-sm" hidden title="Serbest düzeni ızgaraya göre sıfırla">Düzeni sıfırla</button>
     <div class="topbar-right">
       <div id="update" class="update" hidden>
@@ -32,6 +37,8 @@
 
   <main class="layout">
     <section id="grid" class="grid">
+      <div id="guideV" class="guide v" hidden></div>
+      <div id="guideH" class="guide h" hidden></div>
       <div id="empty" class="empty">
         <div class="empty-icon">📺</div>
         <h2>Henüz maç seçilmedi</h2>
@@ -78,7 +85,14 @@
         <span class="src"></span>
       </div>
       <div class="alert-badge"></div>
-      <div class="resize-handle" title="Boyutlandır"></div>
+      <div class="rh n" data-dir="n"></div>
+      <div class="rh s" data-dir="s"></div>
+      <div class="rh e" data-dir="e"></div>
+      <div class="rh w" data-dir="w"></div>
+      <div class="rh nw" data-dir="nw"></div>
+      <div class="rh ne" data-dir="ne"></div>
+      <div class="rh sw" data-dir="sw"></div>
+      <div class="rh se" data-dir="se" title="Boyutlandır"></div>
     </article>
   </template>
 

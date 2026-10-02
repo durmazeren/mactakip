@@ -35,9 +35,24 @@ function bestGrid(n, W, H) {
   return best;
 }
 
-function placeGrid(ids, area) {
+/* Izgara dizilimi:
+ *  auto: animasyonları en büyük gösteren düzen
+ *  row:  yan yana (satır başına en fazla 4 maç)
+ *  col:  alt alta (sütun başına en fazla 4 maç) */
+function gridFor(n, W, H, arrange) {
+  if (!n) return null;
+  if (arrange !== 'row' && arrange !== 'col') return bestGrid(n, W, H);
+  let c, r;
+  if (arrange === 'row') { r = Math.ceil(n / 4); c = Math.ceil(n / r); }
+  else { c = Math.ceil(n / 4); r = Math.ceil(n / c); }
+  const tw = (W - (c - 1) * GAP) / c;
+  const th = (H - (r - 1) * GAP) / r;
+  return { c, r, tw, th, s: contentScale(tw, th) };
+}
+
+function placeGrid(ids, area, arrange = 'auto') {
   const rects = {};
-  const g = bestGrid(ids.length, area.w, area.h);
+  const g = gridFor(ids.length, area.w, area.h, arrange);
   if (!g) return rects;
   ids.forEach((id, i) => {
     const row = Math.floor(i / g.c);
@@ -102,7 +117,7 @@ function freeRects(ids, area) {
   const free = state.layout.free;
   const missing = ids.filter((id) => !free[id]);
   if (missing.length) {
-    const base = placeGrid(ids, area);
+    const base = placeGrid(ids, area, state.layout.arrange);
     for (const id of missing) free[id] = toFraction(base[id], area);
     saveLayout();
   }
@@ -147,7 +162,7 @@ function applyLayout(animate = false) {
   let rects;
   if (lay.mode === 'free') rects = freeRects(ids, area);
   else if (lay.focus) rects = focusLayout(ids, lay.focus, area);
-  else rects = placeGrid(ids, area);
+  else rects = placeGrid(ids, area, lay.arrange);
 
   const grid = $('#grid');
   clearTimeout(animateTimer);
@@ -180,7 +195,7 @@ function setLayoutMode(mode) {
   if (mode === 'free') {
     // Serbest moda ilk geçişte mevcut ızgara düzeninden başla
     const area = gridArea();
-    const base = placeGrid(animIds(), area);
+    const base = placeGrid(animIds(), area, state.layout.arrange);
     for (const id of animIds()) {
       if (!state.layout.free[id]) state.layout.free[id] = toFraction(base[id], area);
     }
@@ -191,9 +206,17 @@ function setLayoutMode(mode) {
   applyLayout(true);
 }
 
+function setArrange(arrange) {
+  state.layout.arrange = arrange;
+  state.layout.focus = null;
+  saveLayout();
+  syncLayoutControls();
+  applyLayout(true);
+}
+
 function resetFreeLayout() {
   const area = gridArea();
-  const base = placeGrid(animIds(), area);
+  const base = placeGrid(animIds(), area, state.layout.arrange);
   state.layout.free = {};
   for (const id of animIds()) state.layout.free[id] = toFraction(base[id], area);
   saveLayout();
@@ -204,6 +227,8 @@ function syncLayoutControls() {
   const mode = state.layout.mode;
   document.body.classList.toggle('free', mode === 'free');
   for (const b of $('#layoutSeg').children) b.classList.toggle('on', b.dataset.layout === mode);
+  for (const b of $('#arrangeSeg').children) b.classList.toggle('on', b.dataset.arrange === (state.layout.arrange || 'auto'));
+  $('#arrangeSeg').hidden = mode !== 'grid';
   $('#resetFree').hidden = mode !== 'free';
 }
 
@@ -213,7 +238,10 @@ function bringToFront(id) {
   state.layout.z = z;
 }
 
-/* Yapışma: kenar, alan sınırı ve diğer kutuların kenarlarına SNAP_PX yakınlıkta yapışır */
+/* Yapışma: alanın kenarları, yarım/üçte bir/çeyrek çizgileri ve diğer kutuların
+ * kenarları. Yapışınca o noktada ince bir kılavuz çizgisi görünür. */
+const SNAP_FRACTIONS = [1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4];
+
 function snapValue(v, candidates) {
   let best = v;
   let dist = SNAP_PX + 1;
@@ -221,80 +249,124 @@ function snapValue(v, candidates) {
     const d = Math.abs(c - v);
     if (d < dist) { dist = d; best = c; }
   }
-  return best;
+  return { v: best, hit: dist <= SNAP_PX };
+}
+
+// Bir kutunun başlangıç (sol/üst) kenarının yapışabileceği konumlar
+function startEdges(size, others, axis) {
+  const pos = axis === 'x' ? 'x' : 'y';
+  const len = axis === 'x' ? 'w' : 'h';
+  return [0, ...SNAP_FRACTIONS.map((f) => f * size + GAP / 2), ...others.flatMap((o) => [o[pos], o[pos] + o[len] + GAP])];
+}
+// Bitiş (sağ/alt) kenarının yapışabileceği konumlar
+function endEdges(size, others, axis) {
+  const pos = axis === 'x' ? 'x' : 'y';
+  const len = axis === 'x' ? 'w' : 'h';
+  return [size, ...SNAP_FRACTIONS.map((f) => f * size - GAP / 2), ...others.flatMap((o) => [o[pos] - GAP, o[pos] + o[len]])];
 }
 
 function otherRects(id) {
   return animIds().filter((x) => x !== id).map((x) => state.tiles.get(x)).filter(Boolean).map((t) => readRect(t.el));
 }
 
-function startDrag(e, tile) {
-  if (state.layout.mode !== 'free' || e.button !== 0 || e.target.closest('button')) return;
-  e.preventDefault();
-  const area = gridArea();
-  const start = readRect(tile.el);
-  const sx = e.clientX, sy = e.clientY;
-  const others = otherRects(tile.id);
-  bringToFront(tile.id);
-  applyLayout(false);
-  document.body.classList.add('dragging');
-  const head = e.currentTarget;
-  head.setPointerCapture(e.pointerId);
-
-  const move = (ev) => {
-    let x = start.x + ev.clientX - sx;
-    let y = start.y + ev.clientY - sy;
-    x = snapValue(x, [0, area.w - start.w, ...others.flatMap((o) => [o.x, o.x + o.w + GAP, o.x - GAP - start.w, o.x + o.w - start.w])]);
-    y = snapValue(y, [0, area.h - start.h, ...others.flatMap((o) => [o.y, o.y + o.h + GAP, o.y - GAP - start.h, o.y + o.h - start.h])]);
-    setRect(tile.el, clampRect({ x, y, w: start.w, h: start.h }, area));
-  };
-  const up = () => {
-    head.removeEventListener('pointermove', move);
-    head.removeEventListener('pointerup', up);
-    head.removeEventListener('pointercancel', up);
-    document.body.classList.remove('dragging');
-    state.layout.free[tile.id] = toFraction(readRect(tile.el), area);
-    saveLayout();
-  };
-  head.addEventListener('pointermove', move);
-  head.addEventListener('pointerup', up);
-  head.addEventListener('pointercancel', up);
+function showGuides(gx, gy) {
+  const v = $('#guideV'), h = $('#guideH');
+  v.hidden = gx == null;
+  h.hidden = gy == null;
+  if (gx != null) v.style.left = `${Math.round(PAD + gx)}px`;
+  if (gy != null) h.style.top = `${Math.round(PAD + gy)}px`;
 }
 
-function startResize(e, tile) {
-  if (state.layout.mode !== 'free' || e.button !== 0) return;
+// Sürükleme ve boyutlandırma için ortak işaretçi takibi
+function trackPointer(e, target, bodyClass, onMove, onEnd) {
   e.preventDefault();
   e.stopPropagation();
+  document.body.classList.add(bodyClass);
+  target.setPointerCapture(e.pointerId);
+  const move = (ev) => onMove(ev.clientX - e.clientX, ev.clientY - e.clientY);
+  const up = () => {
+    target.removeEventListener('pointermove', move);
+    target.removeEventListener('pointerup', up);
+    target.removeEventListener('pointercancel', up);
+    document.body.classList.remove(bodyClass);
+    showGuides(null, null);
+    onEnd();
+  };
+  target.addEventListener('pointermove', move);
+  target.addEventListener('pointerup', up);
+  target.addEventListener('pointercancel', up);
+}
+
+function saveFreeRect(tile, area) {
+  state.layout.free[tile.id] = toFraction(readRect(tile.el), area);
+  saveLayout();
+}
+
+function startDrag(e, tile) {
+  if (state.layout.mode !== 'free' || e.button !== 0 || e.target.closest('button')) return;
   const area = gridArea();
-  const start = readRect(tile.el);
-  const sx = e.clientX, sy = e.clientY;
+  const s = readRect(tile.el);
   const others = otherRects(tile.id);
+  const xs = startEdges(area.w, others, 'x'), xe = endEdges(area.w, others, 'x');
+  const ys = startEdges(area.h, others, 'y'), ye = endEdges(area.h, others, 'y');
   bringToFront(tile.id);
   applyLayout(false);
-  document.body.classList.add('resizing');
-  const handle = e.currentTarget;
-  handle.setPointerCapture(e.pointerId);
 
-  const move = (ev) => {
-    let right = start.x + start.w + ev.clientX - sx;
-    let bottom = start.y + start.h + ev.clientY - sy;
-    right = snapValue(right, [area.w, ...others.flatMap((o) => [o.x - GAP, o.x + o.w])]);
-    bottom = snapValue(bottom, [area.h, ...others.flatMap((o) => [o.y - GAP, o.y + o.h])]);
-    const w = Math.min(Math.max(right - start.x, MIN_W), area.w - start.x);
-    const h = Math.min(Math.max(bottom - start.y, MIN_H), area.h - start.y);
-    setRect(tile.el, { x: start.x, y: start.y, w, h });
+  // Kutunun sol ya da sağ kenarı (üst ya da alt) — hangisi daha yakınsa ona yapışır
+  const snapAxis = (pos, len, starts, ends) => {
+    const a = snapValue(pos, starts);
+    const b = snapValue(pos + len, ends);
+    if (b.hit && (!a.hit || Math.abs(b.v - (pos + len)) < Math.abs(a.v - pos))) return { v: b.v - len, guide: b.v };
+    if (a.hit) return { v: a.v, guide: a.v };
+    return { v: pos, guide: null };
   };
-  const up = () => {
-    handle.removeEventListener('pointermove', move);
-    handle.removeEventListener('pointerup', up);
-    handle.removeEventListener('pointercancel', up);
-    document.body.classList.remove('resizing');
-    state.layout.free[tile.id] = toFraction(readRect(tile.el), area);
-    saveLayout();
-  };
-  handle.addEventListener('pointermove', move);
-  handle.addEventListener('pointerup', up);
-  handle.addEventListener('pointercancel', up);
+
+  trackPointer(e, e.currentTarget, 'dragging', (dx, dy) => {
+    const x = snapAxis(s.x + dx, s.w, xs, xe);
+    const y = snapAxis(s.y + dy, s.h, ys, ye);
+    setRect(tile.el, clampRect({ x: x.v, y: y.v, w: s.w, h: s.h }, area));
+    showGuides(x.guide, y.guide);
+  }, () => saveFreeRect(tile, area));
+}
+
+// dir: n, s, e, w, ne, nw, se, sw — hangi kenar(lar)dan boyutlandırıldığı
+function startResize(e, tile, dir) {
+  if (state.layout.mode !== 'free' || e.button !== 0) return;
+  const area = gridArea();
+  const s = readRect(tile.el);
+  const others = otherRects(tile.id);
+  const xs = startEdges(area.w, others, 'x'), xe = endEdges(area.w, others, 'x');
+  const ys = startEdges(area.h, others, 'y'), ye = endEdges(area.h, others, 'y');
+  bringToFront(tile.id);
+  applyLayout(false);
+  document.body.style.setProperty('--rz-cursor', getComputedStyle(e.currentTarget).cursor);
+
+  trackPointer(e, e.currentTarget, 'resizing', (dx, dy) => {
+    let L = s.x, T = s.y, R = s.x + s.w, B = s.y + s.h;
+    let gx = null, gy = null;
+    if (dir.includes('w')) {
+      const r = snapValue(s.x + dx, xs);
+      L = Math.min(Math.max(r.v, 0), R - MIN_W);
+      if (r.hit) gx = L;
+    }
+    if (dir.includes('e')) {
+      const r = snapValue(R + dx, xe);
+      R = Math.max(Math.min(r.v, area.w), L + MIN_W);
+      if (r.hit) gx = R;
+    }
+    if (dir.includes('n')) {
+      const r = snapValue(s.y + dy, ys);
+      T = Math.min(Math.max(r.v, 0), B - MIN_H);
+      if (r.hit) gy = T;
+    }
+    if (dir.includes('s')) {
+      const r = snapValue(B + dy, ye);
+      B = Math.max(Math.min(r.v, area.h), T + MIN_H);
+      if (r.hit) gy = B;
+    }
+    setRect(tile.el, { x: L, y: T, w: R - L, h: B - T });
+    showGuides(gx, gy);
+  }, () => saveFreeRect(tile, area));
 }
 
 function initLayout() {
@@ -303,6 +375,10 @@ function initLayout() {
     if (mode) setLayoutMode(mode);
   });
   $('#resetFree').addEventListener('click', resetFreeLayout);
+  $('#arrangeSeg').addEventListener('click', (e) => {
+    const arrange = e.target?.dataset?.arrange;
+    if (arrange) setArrange(arrange);
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.layout.focus && !e.target.closest('input, select')) {
       state.layout.focus = null;

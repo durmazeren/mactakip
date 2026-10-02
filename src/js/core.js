@@ -49,7 +49,7 @@ const state = {
   lastShown: new Map(),              // şut ekranında yanıp sönme için önceki değerler
   targets: load('targets', []),      // kupon hedefleri
   targetStatus: new Map(),           // hedef id -> son durum (tuttu animasyonu için)
-  layout: Object.assign({ mode: 'grid', focus: null, free: {}, z: [] }, load('layout', {})),
+  layout: Object.assign({ mode: 'grid', arrange: 'auto', focus: null, free: {}, z: [] }, load('layout', {})),
 };
 
 function loadMatches() {

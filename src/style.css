@@ -171,18 +171,33 @@ select, input { font: inherit; color: var(--text); }
 .tile-foot.no-stats > span:not(.src) { display: none; }
 .tile-foot.no-stats::before { content: 'Bu maç için istatistik yok'; }
 
-/* Serbest mod: sürükle / boyutlandır */
+/* Serbest mod: sürükle / her kenardan boyutlandır */
 body.free .tile-head { cursor: grab; }
 body.dragging, body.dragging * { cursor: grabbing !important; }
-body.resizing, body.resizing * { cursor: nwse-resize !important; }
+body.resizing, body.resizing * { cursor: var(--rz-cursor, nwse-resize) !important; }
 body.dragging webview, body.resizing webview { pointer-events: none; }
-.resize-handle { display: none; }
-body.free .resize-handle {
-  display: block; position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
-  cursor: nwse-resize; z-index: 5;
+body.dragging .tile, body.resizing .tile { transition: none !important; }
+body.free .focus-btn { display: none; }
+.rh { display: none; position: absolute; z-index: 7; }
+body.free .rh { display: block; }
+.rh.n, .rh.s { left: 14px; right: 14px; height: 7px; cursor: ns-resize; }
+.rh.n { top: 0; }
+.rh.s { bottom: 0; }
+.rh.e, .rh.w { top: 14px; bottom: 14px; width: 7px; cursor: ew-resize; }
+.rh.e { right: 0; }
+.rh.w { left: 0; }
+.rh.nw, .rh.ne, .rh.sw, .rh.se { width: 14px; height: 14px; }
+.rh.nw { top: 0; left: 0; cursor: nwse-resize; }
+.rh.ne { top: 0; right: 0; cursor: nesw-resize; }
+.rh.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.rh.se {
+  bottom: 0; right: 0; width: 18px; height: 18px; cursor: nwse-resize;
   background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 58%, transparent 58%, transparent 70%, var(--muted) 70%, var(--muted) 78%, transparent 78%);
 }
-body.free .focus-btn { display: none; }
+body.free .rh.n:hover, body.free .rh.s:hover, body.free .rh.e:hover, body.free .rh.w:hover { background: var(--primary-hl); }
+.guide { position: absolute; z-index: 400; pointer-events: none; background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+.guide.v { top: 0; bottom: 0; width: 1px; }
+.guide.h { left: 0; right: 0; height: 1px; }
 
 /* ---------- Şut / gol uyarısı ---------- */
 .alert-badge {

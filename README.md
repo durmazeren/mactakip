@@ -51,9 +51,9 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - Animasyonlu en fazla 12, toplam 30 maç. Seçilen maçlar, hedefler ve düzen kapatıp açınca hatırlanır.
 
 **Animasyon ekranı**
-- **Izgara:** kutular, animasyonlar en büyük görünecek şekilde otomatik dizilir.
+- **Izgara:** üst bardan dizilim seçilir: **Oto** (animasyonlar en büyük görünecek şekilde), **Yan yana**, **Alt alta**.
 - **Odak modu:** kutudaki ⤢ düğmesi (veya başlığa çift tıklama) o maçı büyütür; diğerleri yanda/altta küçülür ama odaktakinin en az yarı boyunda kalır. Tekrar ⤡ ya da Esc ile çıkılır.
-- **Serbest:** kutuları başlığından tutup sürükle, sağ alt köşeden boyutlandır. Kenarlara ve diğer kutulara yapışır. "Düzeni sıfırla" ızgaraya döner.
+- **Serbest:** kutuları başlığından tutup sürükle; dört kenarından ve dört köşesinden boyutlandır. Alanın kenarlarına, yarım / üçte bir / çeyrek çizgilerine ve diğer kutulara yapışır (yapıştığı yerde kılavuz çizgisi görünür). "Düzeni sıfırla" ızgaraya döner.
 - Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır; animasyonu olmayan veya biten maçlarda atak grafiği gösterilir.
 
 **Şut ekranı**
