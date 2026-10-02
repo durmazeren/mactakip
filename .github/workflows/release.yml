@@ -1,0 +1,90 @@
+# main'e push edildiğinde package.json'daki sürüm için henüz bir GitHub Release
+# yoksa Windows ve Mac kurulum dosyalarını derleyip yeni sürüm olarak yayınlar.
+# Uygulama açılışta bu sürümleri kontrol eder ve isteğe bağlı güncelleme sunar.
+# Yeni sürüm çıkarmak için: package.json "version" alanını artır ve push et.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      exists: ${{ steps.v.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION zaten yayında, derleme atlanıyor."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.exists != 'true'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.blockmap
+            dist/latest*.yml
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          ls -la dist
+          cat > notes.md <<EOF
+          ## Kurulum
+
+          **Windows:** \`MacTakip-Setup-${VERSION}.exe\` dosyasını indir ve çift tıkla. Tek tıkla kurulur, masaüstüne **Maç Takip** simgesi gelir. Uygulama kuruluysa açılışta "Güncelle" düğmesi çıkar, ayrıca indirmen gerekmez.
+
+          **Mac (M1/M2/M3/M4):** \`MacTakip-${VERSION}-mac-arm64.dmg\`  ·  **Mac (Intel):** \`MacTakip-${VERSION}-mac-x64.dmg\`
+          Açılmazsa Terminal'de bir kez: \`xattr -cr "/Applications/Mac Takip.app"\`
+          EOF
+          gh release create "v${VERSION}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Maç Takip ${VERSION}" \
+            --notes-file notes.md

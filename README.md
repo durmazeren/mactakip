@@ -44,17 +44,34 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 
 ## Kullanım
 
+**Maç ekleme**
 - Üstteki kutuya tıkla: canlı ve bugünkü maçlar listelenir. Takım adı yazarak filtrele, tıklayınca eklenir.
 - Satırdaki **Şut** düğmesi maçı sadece şut ekranına ekler (animasyon açmaz). Şut ekranındaki **+ Maç ekle** de aynı işi yapar.
-- Şut ekranındaki ▷ / ▶ düğmesi bir maçın animasyonunu açar/kapatır; kutudaki ▭ düğmesi animasyonu kapatıp maçı şut ekranında bırakır.
 - Listede yoksa Sofascore maç linkini yapıştır (linkin sonunda `#id:12345678` olmalı).
-- Animasyonlu en fazla 12, toplam 30 maç; ızgara maç sayısına göre kendini ayarlar (2, 2x2, 3x2, 4x2…).
-- Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır.
-- Sportradar animasyonu olmayan maçlarda (küçük ligler) yerine Sofascore atak grafiği gösterilir.
-- Şut ekranında "Maç / 1Y / 2Y" ile devre bazlı şutlar; artan sayı yeşil yanıp söner.
-- Maç bitince animasyonun yerine maçın atak grafiği gelir.
-- Küçük liglerde Sofascore şut istatistiği tutmuyorsa kartta bu yazar.
-- Seçilen maçlar kapatıp açınca hatırlanır (her bilgisayar kendi listesini tutar).
+- Animasyonlu en fazla 12, toplam 30 maç. Seçilen maçlar, hedefler ve düzen kapatıp açınca hatırlanır.
+
+**Animasyon ekranı**
+- **Izgara:** kutular, animasyonlar en büyük görünecek şekilde otomatik dizilir.
+- **Odak modu:** kutudaki ⤢ düğmesi (veya başlığa çift tıklama) o maçı büyütür; diğerleri yanda/altta küçülür ama odaktakinin en az yarı boyunda kalır. Tekrar ⤡ ya da Esc ile çıkılır.
+- **Serbest:** kutuları başlığından tutup sürükle, sağ alt köşeden boyutlandır. Kenarlara ve diğer kutulara yapışır. "Düzeni sıfırla" ızgaraya döner.
+- Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır; animasyonu olmayan veya biten maçlarda atak grafiği gösterilir.
+
+**Şut ekranı**
+- Her maç için toplam şut, isabetli şut ve korner; "Maç / 1Y / 2Y" ile devre bazında.
+- Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
+- ▷ / ▶ ile maçın animasyonu açılır/kapanır.
+
+**Kupon takibi**
+- Kartta **+ Hedef ekle (kupon)** → maç, taraf (ev / deplasman / toplam), istatistik (şut / isabetli şut / korner), periyot, üst/alt ve barem.
+- Üst hedef baremi geçince yeşile döner ("Tuttu"), sayaç artmaya devam eder. Alt hedef baremi aşınca kırmızıya döner. Periyot bitince tutmayanlar "Yattı" olur.
+- Şut ekranının üstünde kuponun özeti: kaç hedef tuttu, yattı, devam ediyor.
+
+**Güncelleme**
+- Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta "Güncelle" → "Yeniden başlat ve kur". Mac'te yeni sürümün indirme sayfası açılır.
+
+## Yeni sürüm yayınlama
+
+`package.json` içindeki `version` alanını artırıp (ör. 1.1.0 → 1.2.0) `main`'e push et. GitHub Actions Windows ve Mac kurulum dosyalarını derleyip Releases'a yükler; kurulu uygulamalar açılışta yeni sürümü görür. Sürüm artırılmadan yapılan push'lar yeni sürüm oluşturmaz.
 
 ## Teknik not
 

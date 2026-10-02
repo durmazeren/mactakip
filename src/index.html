@@ -8,25 +8,36 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">⚽ Maç Takip</div>
+    <div class="brand"><span class="brand-dot"></span>Maç Takip</div>
     <div class="picker">
       <input id="search" type="text" autocomplete="off" spellcheck="false"
         placeholder="Takım ara veya Sofascore maç linki yapıştır…">
       <div id="dropdown" class="dropdown" hidden></div>
     </div>
+    <div class="seg" id="layoutSeg" title="Animasyon yerleşimi">
+      <button data-layout="grid" class="on">Izgara</button>
+      <button data-layout="free">Serbest</button>
+    </div>
+    <button id="resetFree" class="btn btn-sm" hidden title="Serbest düzeni ızgaraya göre sıfırla">Düzeni sıfırla</button>
     <div class="topbar-right">
+      <div id="update" class="update" hidden>
+        <span id="updateText"></span>
+        <button id="updateBtn" class="btn btn-primary btn-sm"></button>
+        <button id="updateClose" class="icon-btn" title="Şimdilik kapat">✕</button>
+      </div>
       <span id="status" class="status"></span>
-      <button id="toggleSide" class="btn" title="Şut ekranını aç/kapat">Şut ekranı</button>
+      <button id="toggleSide" class="btn btn-sm" title="Şut ekranını aç/kapat">Şut ekranı</button>
     </div>
   </header>
 
   <main class="layout">
-    <section id="grid" class="grid"></section>
-    <div id="empty" class="empty">
-      <div class="empty-icon">📺</div>
-      <h2>Henüz maç seçilmedi</h2>
-      <p>Üstteki kutuya tıklayıp canlı ya da bugünkü maçlardan seç,<br>veya bir Sofascore maç linki yapıştır.</p>
-    </div>
+    <section id="grid" class="grid">
+      <div id="empty" class="empty">
+        <div class="empty-icon">📺</div>
+        <h2>Henüz maç seçilmedi</h2>
+        <p></p>
+      </div>
+    </section>
 
     <aside id="side" class="side">
       <div class="side-head">
@@ -38,8 +49,9 @@
           <button data-period="2ND">2Y</button>
         </div>
       </div>
+      <div id="couponBar" class="coupon-bar" hidden></div>
       <div id="shotList" class="shot-list"></div>
-      <div class="side-foot">Her 10 sn'de güncellenir</div>
+      <div class="side-foot"><span>Her 10 sn'de güncellenir</span><span id="appVersion"></span></div>
     </aside>
   </main>
 
@@ -54,18 +66,29 @@
           <img class="logo away-logo" alt="">
         </div>
         <span class="minute"></span>
-        <button class="to-shot" title="Animasyonu kapat (sadece şut ekranında kalsın)">▭</button>
-        <button class="close" title="Maçı kaldır">✕</button>
+        <button class="icon-btn focus-btn" title="Odak modu: bu maçı büyüt">⤢</button>
+        <button class="icon-btn to-shot" title="Animasyonu kapat (sadece şut ekranında kalsın)">▭</button>
+        <button class="icon-btn close" title="Maçı kaldır">✕</button>
       </div>
       <div class="stage"><div class="placeholder"></div></div>
       <div class="tile-foot">
         <span>Şut <b class="shots">–</b></span>
         <span>İsabetli <b class="sot">–</b></span>
+        <span>Korner <b class="corners">–</b></span>
         <span class="src"></span>
       </div>
+      <div class="alert-badge"></div>
+      <div class="resize-handle" title="Boyutlandır"></div>
     </article>
   </template>
 
+  <script src="js/core.js"></script>
+  <script src="js/picker.js"></script>
+  <script src="js/layout.js"></script>
+  <script src="js/tiles.js"></script>
+  <script src="js/coupon.js"></script>
+  <script src="js/shots.js"></script>
+  <script src="js/alerts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
