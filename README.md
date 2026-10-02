@@ -4,14 +4,14 @@ Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde g�
 
 ## Başlatma (repodan)
 
-Tek gereksinim **Node.js** (LTS sürümü): https://nodejs.org
+Tek gereksinim **Node.js** (LTS sürümü). Windows'ta yoksa `Baslat-Windows.bat` sorup otomatik kurar (winget ile); Mac'te https://nodejs.org adresinden kurulur.
 
 | Bilgisayar | Çift tıkla |
 |---|---|
 | Windows | `Baslat-Windows.bat` |
 | Mac | `Baslat-Mac.command` |
 
-İlk açılışta gerekli dosyaları kendisi indirir (1-2 dk), sonraki açılışlar direkt. Node.js kurulu değilse dosya bunu söyler ve indirme sayfasını açar.
+İlk açılışta gerekli dosyaları ve Electron'u kendisi indirir (1-2 dk), sonraki açılışlar direkt. Repoyu ZIP olarak indirdiysen önce bir klasöre çıkar, ZIP'in içinden çalıştırma.
 
 - **Windows:** SmartScreen "Windows bilgisayarınızı korudu" derse: "Ek bilgi" → "Yine de çalıştır".
 - **Mac:** İnternetten indirilen `.command` ilk açılışta engellenirse: sağ tık → Aç. Çalıştırılamıyor derse Terminal'de bir kez `chmod +x Baslat-Mac.command`.
