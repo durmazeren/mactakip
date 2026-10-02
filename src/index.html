@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://img.sofascore.com https://api.sofascore.app data:; style-src 'self' 'unsafe-inline'">
+  <title>Maç Takip</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⚽ Maç Takip</div>
+    <div class="picker">
+      <input id="search" type="text" autocomplete="off" spellcheck="false"
+        placeholder="Takım ara veya Sofascore maç linki yapıştır…">
+      <div id="dropdown" class="dropdown" hidden></div>
+    </div>
+    <div class="topbar-right">
+      <span id="status" class="status"></span>
+      <button id="toggleSide" class="btn" title="Şut ekranını aç/kapat">Şut ekranı</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section id="grid" class="grid"></section>
+    <div id="empty" class="empty">
+      <div class="empty-icon">📺</div>
+      <h2>Henüz maç seçilmedi</h2>
+      <p>Üstteki kutuya tıklayıp canlı ya da bugünkü maçlardan seç,<br>veya bir Sofascore maç linki yapıştır.</p>
+    </div>
+
+    <aside id="side" class="side">
+      <div class="side-head">
+        <h3>Şut ekranı</h3>
+        <button id="addShot" class="btn btn-sm" title="Sadece şut ekranına maç ekle">+ Maç ekle</button>
+        <div class="seg" id="periodSeg">
+          <button data-period="ALL" class="on">Maç</button>
+          <button data-period="1ST">1Y</button>
+          <button data-period="2ND">2Y</button>
+        </div>
+      </div>
+      <div id="shotList" class="shot-list"></div>
+      <div class="side-foot">Her 10 sn'de güncellenir</div>
+    </aside>
+  </main>
+
+  <template id="tileTpl">
+    <article class="tile">
+      <div class="tile-head">
+        <div class="teams">
+          <img class="logo home-logo" alt="">
+          <span class="home-name"></span>
+          <span class="score">–</span>
+          <span class="away-name"></span>
+          <img class="logo away-logo" alt="">
+        </div>
+        <span class="minute"></span>
+        <button class="to-shot" title="Animasyonu kapat (sadece şut ekranında kalsın)">▭</button>
+        <button class="close" title="Maçı kaldır">✕</button>
+      </div>
+      <div class="stage"><div class="placeholder"></div></div>
+      <div class="tile-foot">
+        <span>Şut <b class="shots">–</b></span>
+        <span>İsabetli <b class="sot">–</b></span>
+        <span class="src"></span>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

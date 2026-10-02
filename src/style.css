@@ -1,0 +1,180 @@
+:root {
+  --bg: #0b0f17;
+  --panel: #131a26;
+  --panel-2: #1a2333;
+  --line: #243047;
+  --text: #e6ebf5;
+  --muted: #8b97ad;
+  --accent: #5b7cfa;
+  --live: #ff4d5e;
+  --flash: #2fd27a;
+  --home: #4f8cff;
+  --away: #ff9f43;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* Üst bar */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+.topbar > * { -webkit-app-region: no-drag; }
+.brand { font-weight: 700; font-size: 15px; white-space: nowrap; -webkit-app-region: drag; }
+.picker { position: relative; flex: 1; max-width: 560px; }
+#search {
+  width: 100%; padding: 9px 12px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; outline: none;
+}
+#search:focus { border-color: var(--accent); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.status { color: var(--muted); font-size: 12px; }
+.btn {
+  background: var(--panel-2); border: 1px solid var(--line);
+  padding: 7px 12px; border-radius: 8px;
+}
+.btn:hover { border-color: var(--accent); }
+
+/* Maç seçme listesi */
+.dropdown {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 50;
+  max-height: 70vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  padding: 6px;
+}
+.dd-section { padding: 8px 8px 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.dd-hint { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
+.dd-right { display: flex; align-items: center; gap: 8px; }
+.dd-tag { font-size: 11px; color: var(--flash); white-space: nowrap; }
+.dd-shot {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 3px 9px; font-size: 12px; color: var(--muted);
+}
+.dd-shot:hover { border-color: var(--accent); color: var(--text); }
+.dd-item {
+  display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer;
+}
+.dd-item:hover, .dd-item.active { background: var(--panel-2); }
+.dd-item.selected .dd-teams, .dd-item.selected .dd-time { opacity: .5; }
+.dd-time { font-size: 12px; color: var(--muted); text-align: center; }
+.dd-time.live { color: var(--live); font-weight: 700; }
+.dd-teams { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-teams small { display: block; color: var(--muted); font-size: 11px; }
+.dd-score { font-weight: 700; font-variant-numeric: tabular-nums; }
+.dd-empty { padding: 14px; color: var(--muted); text-align: center; }
+
+/* Ana yerleşim */
+.layout { flex: 1; display: flex; min-height: 0; position: relative; }
+.grid {
+  flex: 1; min-width: 0;
+  display: grid; gap: 8px; padding: 8px;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr));
+}
+.empty {
+  position: absolute; inset: 0 340px 0 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--muted); text-align: center; pointer-events: none;
+}
+body.side-hidden .empty { right: 0; }
+.empty h2 { color: var(--text); margin: 8px 0; font-size: 18px; }
+.empty-icon { font-size: 40px; }
+
+/* Maç kutusu */
+.tile {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden;
+}
+.tile-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.teams { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.teams span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-name, .away-name { flex: 1 1 0; min-width: 0; }
+.home-name { text-align: right; }
+.logo { width: 18px; height: 18px; object-fit: contain; flex: none; }
+.score { font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; padding: 0 4px; flex: none; }
+.minute { font-size: 12px; font-weight: 700; color: var(--muted); min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.minute.live { color: var(--live); }
+.close, .to-shot { background: none; border: 0; color: var(--muted); padding: 2px 4px; border-radius: 4px; }
+.close:hover, .to-shot:hover { color: var(--text); background: var(--line); }
+.stage { flex: 1; min-height: 0; position: relative; background: var(--bg); }
+.stage webview { position: absolute; inset: 0; width: 100%; height: 100%; }
+.placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  color: var(--muted); text-align: center; padding: 10px;
+}
+.placeholder b { color: var(--text); font-size: 16px; }
+.tile-foot {
+  display: flex; gap: 14px; align-items: center;
+  padding: 5px 10px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--muted);
+}
+.tile-foot b { color: var(--text); font-variant-numeric: tabular-nums; }
+.tile-foot .src { margin-left: auto; font-size: 11px; }
+
+/* Şut ekranı */
+.side {
+  width: 340px; flex: none;
+  display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line);
+}
+body.side-hidden .side { display: none; }
+.side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.side-head h3 { margin: 0; font-size: 14px; }
+.side-head { gap: 8px; flex-wrap: wrap; }
+.btn-sm { padding: 4px 9px; font-size: 12px; margin-right: auto; }
+.seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.seg button { background: none; border: 0; padding: 4px 10px; border-radius: 5px; color: var(--muted); }
+.seg button.on { background: var(--panel-2); color: var(--text); }
+.shot-list { flex: 1; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.shot-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; }
+.sc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.sc-btn {
+  background: none; border: 0; color: var(--muted); padding: 1px 5px; border-radius: 4px; font-size: 12px; flex: none;
+}
+.sc-btn:hover { background: var(--line); color: var(--text); }
+.sc-btn.on { color: var(--accent); }
+.shot-only { border-style: dashed; }
+.sc-meta { margin-left: auto; }
+.sc-title { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-meta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sc-meta.live { color: var(--live); font-weight: 700; }
+.sc-row { display: grid; grid-template-columns: 1fr 34px 90px 34px; align-items: center; gap: 6px; padding: 3px 0; }
+.sc-row .label { color: var(--muted); font-size: 12px; }
+.sc-row .val { text-align: center; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; border-radius: 5px; transition: background .3s; }
+.sc-row .val.home { color: var(--home); }
+.sc-row .val.away { color: var(--away); }
+.bar { height: 6px; border-radius: 3px; background: var(--away); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--home); }
+.sc-teams { display: grid; grid-template-columns: 1fr 1fr; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.sc-teams span:last-child { text-align: right; }
+.flash { animation: flash 2.5s ease-out; }
+@keyframes flash { 0% { background: var(--flash); color: #000; } 100% { background: transparent; } }
+.side-foot { padding: 8px 12px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
+.sc-empty { color: var(--muted); text-align: center; padding: 20px 10px; }
+.sc-none { color: var(--muted); font-size: 12px; padding: 4px 0 2px; }
+.tile-foot.no-stats > span:not(.src) { display: none; }
+.tile-foot.no-stats::before { content: 'Bu maç için şut verisi yok'; }
