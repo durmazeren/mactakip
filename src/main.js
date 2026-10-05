@@ -7,6 +7,9 @@ const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
 
 let win = null;
 
+// Geliştirme/test için ayrı veri klasörü (açık olan asıl uygulamanın listesine dokunmamak için)
+if (process.env.MT_USER_DATA) app.setPath('userData', process.env.MT_USER_DATA);
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1500,
@@ -30,6 +33,12 @@ function createWindow() {
     wc.setWindowOpenHandler(({ url }) => {
       shell.openExternal(url);
       return { action: 'deny' };
+    });
+    // Odak animasyondayken de F (tam ekran) ve Esc (odaktan çık) çalışsın
+    wc.on('before-input-event', (_ev, input) => {
+      if (input.type !== 'keyDown' || input.control || input.meta || input.alt) return;
+      const key = input.key === 'F' ? 'f' : input.key;
+      if (key === 'f' || key === 'Escape') win.webContents.send('shortcut', key);
     });
   });
 }

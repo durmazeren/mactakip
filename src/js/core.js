@@ -50,6 +50,7 @@ const state = {
   targets: load('targets', []),      // kupon hedefleri
   targetStatus: new Map(),           // hedef id -> son durum (tuttu animasyonu için)
   cardStats: load('cardStats', ['shots', 'sot', 'corners']), // şut kartında görünen istatistikler
+  cardSort: load('cardSort', 'manual'), // şut kartı sıralaması: manual | auto
   layout: Object.assign({ mode: 'grid', arrange: 'auto', focus: null, free: {}, z: [] }, load('layout', {})),
 };
 

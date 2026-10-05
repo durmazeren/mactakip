@@ -45,6 +45,7 @@ function ensureCard(id) {
   rm.title = 'Maçı kaldır';
   rm.addEventListener('click', () => removeMatch(id));
   top.append(title, meta, targetBtn, animBtn, rm);
+  title.addEventListener('pointerdown', (e) => startCardDrag(e, id));
 
   const statsBox = el('div', 'sc-stats');
   const rows = {};
@@ -117,6 +118,77 @@ function updateCard(id) {
   renderTargets(id, c.targets);
 }
 
+/* Kart sıralaması
+ * Elle: kartı başlığından (takım adlarından) tutup sürükle; sıra animasyon ızgarasına da yansır.
+ * Otomatik: hedefli canlı maçlar → canlı → başlamamış → biten (bitenler küçülür). */
+function cardGroup(id) {
+  const ev = state.events.get(id);
+  if (isLive(ev)) return state.targets.some((t) => t.matchId === id) ? 0 : 1;
+  if (ev?.status?.type === 'notstarted') return 2;
+  return 3;
+}
+
+function cardOrder() {
+  const ids = state.matches.map((m) => m.id);
+  if (state.cardSort !== 'auto') return ids;
+  return ids.map((id, i) => [id, cardGroup(id), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0]);
+}
+
+function applyCardOrder() {
+  cardOrder().forEach((id, i) => {
+    const c = shotCards.get(id);
+    if (c) c.el.style.order = i;
+  });
+}
+
+function startCardDrag(e, id) {
+  if (state.cardSort === 'auto' || e.button !== 0) return;
+  const card = shotCards.get(id)?.el;
+  if (!card) return;
+  e.preventDefault();
+  const target = e.currentTarget;
+  target.setPointerCapture(e.pointerId);
+  card.classList.add('card-dragging');
+  document.body.classList.add('card-drag');
+  let moved = false;
+
+  const move = (ev) => {
+    // İmlecin üstündeki kartı bul; ortasının üstündeysek önüne, altındaysak arkasına taşı
+    const over = [...shotCards.entries()].find(([oid, c]) => {
+      if (oid === id) return false;
+      const r = c.el.getBoundingClientRect();
+      return ev.clientY >= r.top && ev.clientY <= r.bottom;
+    });
+    if (!over) return;
+    const [oid, oc] = over;
+    const r = oc.el.getBoundingClientRect();
+    const after = ev.clientY > r.top + r.height / 2;
+    const list = state.matches.filter((m) => m.id !== id);
+    let idx = list.findIndex((m) => m.id === oid) + (after ? 1 : 0);
+    const cur = state.matches.findIndex((m) => m.id === id);
+    list.splice(idx, 0, state.matches[cur]);
+    if (list.some((m, i) => m.id !== state.matches[i].id)) {
+      state.matches = list;
+      moved = true;
+      applyCardOrder();
+    }
+  };
+  const up = () => {
+    target.removeEventListener('pointermove', move);
+    target.removeEventListener('pointerup', up);
+    target.removeEventListener('pointercancel', up);
+    card.classList.remove('card-dragging');
+    document.body.classList.remove('card-drag');
+    if (moved) {
+      saveMatches();
+      applyLayout(true);
+    }
+  };
+  target.addEventListener('pointermove', move);
+  target.addEventListener('pointerup', up);
+  target.addEventListener('pointercancel', up);
+}
+
 function renderShotList() {
   const list = $('#shotList');
   const ids = new Set(state.matches.map((m) => m.id));
@@ -127,12 +199,15 @@ function renderShotList() {
       shotCards.delete(id);
     }
   }
-  state.matches.forEach((m, i) => {
-    if (!state.events.has(m.id)) return;
+  for (const m of state.matches) {
+    if (!state.events.has(m.id)) continue;
     const c = ensureCard(m.id);
-    c.el.style.order = i;
+    c.el.classList.toggle('collapsed', state.cardSort === 'auto' && isOver(state.events.get(m.id)));
+    c.el.classList.toggle('sortable', state.cardSort !== 'auto');
     updateCard(m.id);
-  });
+  }
+  applyCardOrder();
+  renderPlayerTargets();
 
   let empty = $('.sc-empty', list);
   if (!state.matches.length) {
@@ -162,6 +237,19 @@ function initCardSettings() {
       renderShotList();
     });
     label.append(box, el('span', null, full));
+    pop.append(label);
+  }
+  pop.append(el('div', 'pop-title', 'Sıralama'));
+  for (const [value, text] of [['manual', 'Elle (kartı sürükle)'], ['auto', 'Otomatik (canlı ve hedefli üstte)']]) {
+    const label = el('label', 'cfg-row');
+    const radio = el('input');
+    Object.assign(radio, { type: 'radio', name: 'cardSort', value, checked: state.cardSort === value });
+    radio.addEventListener('change', () => {
+      state.cardSort = value;
+      save('cardSort', value);
+      renderShotList();
+    });
+    label.append(radio, el('span', null, text));
     pop.append(label);
   }
   btn.addEventListener('click', (e) => {

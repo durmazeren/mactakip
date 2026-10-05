@@ -82,6 +82,7 @@ async function pollOne(id) {
   const [evRes, stRes] = await Promise.all([
     api(`event/${id}`).catch(() => undefined),
     api(`event/${id}/statistics`).catch(() => undefined),
+    needsPlayers(id) ? loadPlayers(id) : null,
   ]);
   if (!findMatch(id)) return true;
   if (evRes?.event) state.events.set(id, evRes.event);
@@ -159,6 +160,39 @@ function initUpdates() {
   $('#updateClose').addEventListener('click', () => { box.hidden = true; });
 }
 
+/* ---------- Tam ekran ---------- */
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(() => {});
+}
+
+function initFullscreen() {
+  $('#fsBtn').addEventListener('click', toggleFullscreen);
+  const hint = $('#fsHint');
+  let hintTimer = null;
+  document.addEventListener('fullscreenchange', () => {
+    const on = !!document.fullscreenElement;
+    document.body.classList.toggle('fs', on);
+    clearTimeout(hintTimer);
+    hint.hidden = !on;
+    if (on) hintTimer = setTimeout(() => { hint.hidden = true; }, 2500);
+  });
+  // F: tam ekran. Animasyonun içindeyken de çalışsın diye ana süreç de kısayolu iletiyor.
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey
+      && !e.target.closest('input, select, textarea')) toggleFullscreen();
+  });
+  window.appShortcut.on((key) => {
+    if (key === 'f') toggleFullscreen();
+    if (key === 'Escape' && state.layout.focus) {
+      state.layout.focus = null;
+      saveLayout();
+      applyLayout(true);
+    }
+  });
+}
+
 /* ---------- Başlangıç ---------- */
 
 function init() {
@@ -166,6 +200,7 @@ function init() {
   initLayout();
   initUpdates();
   initCardSettings();
+  initFullscreen();
   $('#toggleSide').addEventListener('click', () => document.body.classList.toggle('side-hidden'));
   $('#periodSeg').addEventListener('click', (e) => {
     const p = e.target?.dataset?.period;
