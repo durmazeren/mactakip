@@ -57,12 +57,13 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır; animasyonu olmayan veya biten maçlarda atak grafiği gösterilir.
 
 **Şut ekranı**
-- Her maç için toplam şut, isabetli şut ve korner; "Maç / 1Y / 2Y" ile devre bazında.
+- Her maç için toplam şut, isabetli şut ve korner, her biri tek satırda; "Maç / 1Y / 2Y" ile devre bazında.
+- ⚙ ile kartta hangi istatistiklerin görüneceği seçilir (ör. korneri kapat).
 - Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
 - ▷ / ▶ ile maçın animasyonu açılır/kapanır.
 
 **Kupon takibi**
-- Kartta **+ Hedef ekle (kupon)** → maç, taraf (ev / deplasman / toplam), istatistik (şut / isabetli şut / korner), periyot, üst/alt ve barem.
+- Kartın başlığındaki **+ Hedef** → maç, taraf (ev / deplasman / toplam), istatistik (şut / isabetli şut / korner), periyot, üst/alt ve barem. Hedefler kartın altında ince çubuk olarak görünür.
 - Üst hedef baremi geçince yeşile döner ("Tuttu"), sayaç artmaya devam eder. Alt hedef baremi aşınca kırmızıya döner. Periyot bitince tutmayanlar "Yattı" olur.
 - Şut ekranının üstünde kuponun özeti: kaç hedef tuttu, yattı, devam ediyor.
 

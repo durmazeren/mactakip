@@ -165,6 +165,7 @@ function init() {
   initPicker();
   initLayout();
   initUpdates();
+  initCardSettings();
   $('#toggleSide').addEventListener('click', () => document.body.classList.toggle('side-hidden'));
   $('#periodSeg').addEventListener('click', (e) => {
     const p = e.target?.dataset?.period;

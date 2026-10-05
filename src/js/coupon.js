@@ -145,7 +145,7 @@ function closeTargetForm() {
   if (!openForm) return;
   openForm.node.remove();
   const card = shotCards.get(openForm.matchId);
-  if (card) card.addBtn.hidden = false;
+  if (card) card.targetBtn.classList.remove('on');
   openForm = null;
 }
 
@@ -234,7 +234,7 @@ function openTargetForm(matchId) {
 
   sync();
   card.formHost.append(form);
-  card.addBtn.hidden = true;
+  card.targetBtn.classList.add('on');
   openForm = { matchId, node: form };
   lineIn.focus();
   lineIn.select();

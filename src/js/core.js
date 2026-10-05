@@ -49,6 +49,7 @@ const state = {
   lastShown: new Map(),              // şut ekranında yanıp sönme için önceki değerler
   targets: load('targets', []),      // kupon hedefleri
   targetStatus: new Map(),           // hedef id -> son durum (tuttu animasyonu için)
+  cardStats: load('cardStats', ['shots', 'sot', 'corners']), // şut kartında görünen istatistikler
   layout: Object.assign({ mode: 'grid', arrange: 'auto', focus: null, free: {}, z: [] }, load('layout', {})),
 };
 

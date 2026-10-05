@@ -4,23 +4,23 @@
  * sadece değerler değişir (açık hedef formu ve yazılan değer kaybolmasın diye). */
 
 const shotCards = new Map(); // id -> { el, refs... }
-const CARD_STATS = [['shots', 'Toplam şut'], ['sot', 'İsabetli şut'], ['corners', 'Korner']];
+const CARD_STATS = [['shots', 'Şut', 'Toplam şut'], ['sot', 'İsabetli', 'İsabetli şut'], ['corners', 'Korner', 'Korner']];
 
+// Kartta hangi istatistiklerin görüneceği (⚙ ayarı)
+const cardStatsVisible = () => state.cardStats;
+
+// Tek satırlık karşılaştırma: 19 ▬▬▬ Şut ▬▬▬ 16
 function cmpRow(label) {
   const root = el('div', 'cmp');
-  const top = el('div', 'cmp-top');
   const h = el('span', 'val home');
   const a = el('span', 'val away');
-  top.append(h, el('span', 'label', label), a);
-  const bars = el('div', 'cmp-bars');
-  const hb = el('div', 'half home');
-  const ab = el('div', 'half away');
+  const hb = el('div', 'bar home');
+  const ab = el('div', 'bar away');
   const hi = el('i');
   const ai = el('i');
   hb.append(hi);
   ab.append(ai);
-  bars.append(hb, ab);
-  root.append(top, bars);
+  root.append(h, hb, el('span', 'label', label), ab, a);
   return { root, h, a, hb, ab, hi, ai };
 }
 
@@ -29,35 +29,37 @@ function ensureCard(id) {
   const card = el('div', 'shot-card');
   const top = el('div', 'sc-top');
   const title = el('div', 'sc-title');
+  const homeN = el('span', 'home');
+  const score = el('b', 'sc-score');
+  const awayN = el('span', 'away');
+  title.append(homeN, score, awayN);
   const meta = el('div', 'sc-meta');
+  const targetBtn = el('button', 'sc-target-btn', '+ Hedef');
+  targetBtn.title = 'Kupon hedefi ekle';
+  targetBtn.addEventListener('click', () => {
+    if (openForm?.matchId === id) closeTargetForm(); else openTargetForm(id);
+  });
   const animBtn = el('button', 'icon-btn');
   animBtn.addEventListener('click', () => setAnim(id, !findMatch(id)?.anim));
   const rm = el('button', 'icon-btn', '✕');
   rm.title = 'Maçı kaldır';
   rm.addEventListener('click', () => removeMatch(id));
-  top.append(title, meta, animBtn, rm);
+  top.append(title, meta, targetBtn, animBtn, rm);
 
-  const teams = el('div', 'sc-teams');
-  const homeN = el('span');
-  const awayN = el('span');
-  teams.append(homeN, awayN);
-
-  const statsBox = el('div');
+  const statsBox = el('div', 'sc-stats');
   const rows = {};
-  for (const [key, label] of CARD_STATS) {
+  for (const [key, label, full] of CARD_STATS) {
     rows[key] = cmpRow(label);
+    rows[key].root.title = full;
     statsBox.append(rows[key].root);
   }
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
-
   const targets = el('div', 'targets');
   const formHost = el('div');
-  const addBtn = el('button', 'sc-add', '+ Hedef ekle (kupon)');
-  addBtn.addEventListener('click', () => openTargetForm(id));
 
-  card.append(top, teams, statsBox, none, targets, formHost, addBtn, el('div', 'alert-badge'));
+  card.append(top, statsBox, none, targets, formHost, el('div', 'alert-badge'));
   $('#shotList').append(card);
-  const ref = { el: card, title, meta, animBtn, homeN, awayN, statsBox, rows, none, targets, formHost, addBtn };
+  const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows, none, targets, formHost };
   shotCards.set(id, ref);
   return ref;
 }
@@ -89,23 +91,28 @@ function updateCard(id) {
   if (!ev || !m) return;
   const c = ensureCard(id);
   c.el.classList.toggle('shot-only', !m.anim);
-  c.title.textContent = `${teamName(ev.homeTeam)} ${scoreText(ev)} ${teamName(ev.awayTeam)}`;
+  c.homeN.textContent = teamName(ev.homeTeam);
+  c.awayN.textContent = teamName(ev.awayTeam);
+  c.score.textContent = scoreText(ev);
   c.title.title = `${ev.homeTeam?.name} – ${ev.awayTeam?.name}`;
   c.meta.textContent = minuteText(ev);
   c.meta.classList.toggle('live', isLive(ev));
+  c.targetBtn.classList.toggle('on', openForm?.matchId === id);
   c.animBtn.textContent = m.anim ? '▶' : '▷';
   c.animBtn.classList.toggle('on', m.anim);
   c.animBtn.title = m.anim ? 'Animasyonu kapat (sadece şut ekranında kalsın)' : 'Animasyonu aç';
-  c.homeN.textContent = teamName(ev.homeTeam);
-  c.awayN.textContent = teamName(ev.awayTeam);
 
   const all = state.stats.get(id);
   const none = !!all?.none;
-  c.statsBox.hidden = none;
+  const visible = cardStatsVisible();
+  c.statsBox.hidden = none || !visible.length;
   c.none.hidden = !none;
   if (!none) {
     const st = all?.[state.period];
-    for (const [key] of CARD_STATS) setCmp(c.rows[key], id, key, st?.[key]);
+    for (const [key] of CARD_STATS) {
+      c.rows[key].root.hidden = !visible.includes(key);
+      setCmp(c.rows[key], id, key, st?.[key]);
+    }
   }
   renderTargets(id, c.targets);
 }
@@ -137,4 +144,31 @@ function renderShotList() {
     empty.remove();
   }
   renderCouponBar();
+}
+
+/* ⚙ Kart ayarı: hangi istatistikler görünsün */
+function initCardSettings() {
+  const btn = $('#cardCfgBtn');
+  const pop = $('#cardCfg');
+  for (const [key, , full] of CARD_STATS) {
+    const label = el('label', 'cfg-row');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = state.cardStats.includes(key);
+    box.addEventListener('change', () => {
+      state.cardStats = CARD_STATS.map(([k]) => k)
+        .filter((k) => (k === key ? box.checked : state.cardStats.includes(k)));
+      save('cardStats', state.cardStats);
+      renderShotList();
+    });
+    label.append(box, el('span', null, full));
+    pop.append(label);
+  }
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pop.hidden = !pop.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+  });
 }
