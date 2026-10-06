@@ -9,6 +9,7 @@ function createTile(id) {
   $('.close', node).addEventListener('click', () => removeMatch(id));
   $('.to-shot', node).addEventListener('click', () => setAnim(id, false));
   $('.focus-btn', node).addEventListener('click', () => toggleFocus(id));
+  $('.reset-btn', node).addEventListener('click', () => resetMatch(id));
   const head = $('.tile-head', node);
   head.addEventListener('pointerdown', (e) => startDrag(e, tile));
   head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFocus(id); });

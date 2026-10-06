@@ -136,7 +136,16 @@ function parseStats(json) {
       const a = it.awayValue ?? parseInt(it.away, 10);
       return [Number.isFinite(h) ? h : 0, Number.isFinite(a) ? a : 0];
     };
-    out[block.period] = { shots: pick('totalShotsOnGoal'), sot: pick('shotsOnGoal'), corners: pick('cornerKicks') };
+    // Sofascore değeri 0 olan satırları göndermiyor (ör. isabetli şut 0-0 ise satır yok).
+    // Toplam şut = isabetli + isabetsiz + bloklanan; eksik olanı diğerlerinden tamamla.
+    let shots = pick('totalShotsOnGoal');
+    let sot = pick('shotsOnGoal');
+    const off = pick('shotsOffGoal');
+    const blocked = pick('blockedScoringAttempt');
+    const z = (v, i) => (v ? v[i] : 0);
+    if (!shots && (sot || off || blocked)) shots = [0, 1].map((i) => z(sot, i) + z(off, i) + z(blocked, i));
+    if (!sot && shots && (off || blocked)) sot = [0, 1].map((i) => Math.max(0, shots[i] - z(off, i) - z(blocked, i)));
+    out[block.period] = { shots, sot, corners: pick('cornerKicks') };
   }
   return out;
 }

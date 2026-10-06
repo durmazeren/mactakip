@@ -53,6 +53,29 @@ function removeMatch(id) {
   refresh(true);
 }
 
+// ↻ Maçı sıfırdan yükle: önbellekteki veriyi at, animasyonu yeniden aç, hemen sorgula
+async function resetMatch(id) {
+  if (!findMatch(id)) return;
+  const buttons = [state.tiles.get(id)?.el, shotCards.get(id)?.el]
+    .filter(Boolean).map((n) => $('.reset-btn', n));
+  buttons.forEach((b) => b.classList.add('spinning'));
+  state.stats.delete(id);
+  state.lastPoll.delete(id);
+  players.delete(id);
+  forgetAlerts(id); // yeni veriyle sahte şut uyarısı çıkmasın
+  for (const k of [...state.lastShown.keys()]) if (k.startsWith(`${id}|`)) state.lastShown.delete(k);
+  const tile = state.tiles.get(id);
+  if (tile) {
+    if (tile.webview) { tile.webview.remove(); tile.webview = null; }
+    tile.mode = null; // updateTile animasyonu baştan kurar
+  }
+  const ok = await pollOne(id);
+  renderShotList();
+  buttons.forEach((b) => b.classList.remove('spinning'));
+  const ev = state.events.get(id);
+  setStatus(ok ? `${teamName(ev?.homeTeam)} – ${teamName(ev?.awayTeam)} yenilendi` : 'Yenilenemedi, bağlantıyı kontrol et');
+}
+
 function refresh(animate) {
   const hasAnim = animIds().length > 0;
   $('#empty').hidden = hasAnim;

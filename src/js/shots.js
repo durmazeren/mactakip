@@ -44,7 +44,10 @@ function ensureCard(id) {
   const rm = el('button', 'icon-btn', '✕');
   rm.title = 'Maçı kaldır';
   rm.addEventListener('click', () => removeMatch(id));
-  top.append(title, meta, targetBtn, animBtn, rm);
+  const resetBtn = el('button', 'icon-btn reset-btn', '↻');
+  resetBtn.title = 'Bu maçı yenile (veriyi ve animasyonu baştan yükle)';
+  resetBtn.addEventListener('click', () => resetMatch(id));
+  top.append(title, meta, targetBtn, resetBtn, animBtn, rm);
   title.addEventListener('pointerdown', (e) => startCardDrag(e, id));
 
   const statsBox = el('div', 'sc-stats');

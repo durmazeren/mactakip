@@ -361,3 +361,7 @@ body.fs .topbar, body.fs .side { display: none !important; }
   background: var(--sp); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .5); pointer-events: none;
 }
+
+/* ↻ yenile */
+.reset-btn.spinning { animation: spin .8s linear infinite; color: var(--primary); }
+@keyframes spin { to { transform: rotate(360deg); } }
