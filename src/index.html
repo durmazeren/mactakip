@@ -93,7 +93,7 @@
               </select>
             </label>
           </div>
-          <p>Scraper canlı oran sağlarsa yalnızca güncel kaynak zaman damgalı ve eşleşen marketler sinyal teyidinde kullanılır. Oran bulunamazsa xG/istatistik modeli çalışmayı sürdürür. Olasılık ve tempo aralıkları tarihsel sonuçlarla kalibre edilmemiştir; ufuk 49′/94′ varsayılır.</p>
+          <p>Canlı fiyatlar yalnızca güncel zaman damgası ve eşleşen maç/market kimliğiyle değerlendirilir. Model güveni, edge ve EV geçmiş maçlarla kalibre edilmemiş teorik karşılaştırmalardır; sonuç olasılığı veya bahis tavsiyesi değildir. Sağlayıcı uzatma süresini paylaşmazsa projeksiyon belirsiz gösterilir.</p>
         </div>
         <div id="analysisSummary" class="analysis-summary" role="status" aria-live="polite"></div>
         <div id="analysisList" class="analysis-list"></div>
@@ -146,6 +146,7 @@
   <script src="js/shots.js"></script>
   <script src="js/alerts.js"></script>
   <script src="js/odds-engine.js"></script>
+  <script src="js/analysis-state.js"></script>
   <script src="js/analysis-engine.js"></script>
   <script src="js/analysis.js"></script>
   <script src="app.js"></script>

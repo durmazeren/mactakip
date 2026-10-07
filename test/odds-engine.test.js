@@ -84,6 +84,29 @@ test('only a fresh provider timestamp can confirm a signal direction', () => {
   assert.equal(OddsEngine.summary(unverified, now).key, 'unverified');
 });
 
+test('market assessment binds event, market, period, line, selection and calculates fair value', () => {
+  const now = Date.now();
+  const eventIdentity = 'event-1|home-1|away-2|league-5|1800000000';
+  const snapshot = OddsEngine.parseSnapshot({ markets: [{
+    id: 77, provider: { id: 12, name: 'Example Book' },
+    marketName: 'Total Goals Over/Under 2.5', updatedAt: now,
+    choices: [{ name: 'Over 2.5', decimalValue: 1.8 }, { name: 'Under 2.5', decimalValue: 2.1 }],
+  }] }, { eventLive: true, observedAt: now, eventIdentity });
+
+  const assessment = OddsEngine.marketAssessment(snapshot, 'match-over-2_5', 0.70, now, eventIdentity);
+  assert.equal(assessment.verified, true);
+  assert.equal(assessment.identity.market, 'total-goals');
+  assert.equal(assessment.identity.period, 'match');
+  assert.equal(assessment.identity.line, '2.5');
+  assert.equal(assessment.identity.bookmakerId, 12);
+  assert.equal(assessment.provider, 'Example Book');
+  assert.equal(assessment.modelFairOdds, 1 / 0.70);
+  assert.ok(Math.abs(assessment.edge - (0.70 - snapshot.markets.matchTotals['2.5'].fair.over)) < 1e-12);
+  assert.ok(Math.abs(assessment.expectedValue - (0.70 * 1.8 - 1)) < 1e-12);
+  assert.equal(OddsEngine.marketAssessment(snapshot, 'match-over-3_5', 0.7, now, eventIdentity), null);
+  assert.equal(OddsEngine.marketAssessment(snapshot, 'match-over-2_5', 0.7, now, 'another-event').verified, false);
+});
+
 test('fractional and American prices normalize to decimal market quotes', () => {
   const now = Date.now();
   const snapshot = OddsEngine.parseSnapshot({ markets: [{

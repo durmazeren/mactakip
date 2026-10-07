@@ -38,6 +38,7 @@ function setAnim(id, anim) {
 }
 
 function removeMatch(id) {
+  state.pollRevision.set(id, (state.pollRevision.get(id) || 0) + 1);
   state.matches = state.matches.filter((m) => m.id !== id);
   saveMatches();
   destroyTile(id);
@@ -45,6 +46,7 @@ function removeMatch(id) {
   forgetAlerts(id);
   state.events.delete(id);
   state.stats.delete(id);
+  state.apiStatus.delete(id);
   state.lastPoll.delete(id);
   forgetAnalysis(id);
   delete state.layout.free[id];
@@ -57,6 +59,7 @@ function removeMatch(id) {
 // ↻ Maçı sıfırdan yükle: önbellekteki veriyi at, animasyonu yeniden aç, hemen sorgula
 async function resetMatch(id) {
   if (!findMatch(id)) return;
+  state.pollRevision.set(id, (state.pollRevision.get(id) || 0) + 1);
   const buttons = [state.tiles.get(id)?.el, shotCards.get(id)?.el]
     .filter(Boolean).map((n) => $('.reset-btn', n));
   buttons.forEach((b) => b.classList.add('spinning'));
@@ -106,37 +109,77 @@ function needsPoll(id) {
 }
 
 async function pollOne(id) {
-  const previousPhaseCode = state.events.get(id)?.status?.code;
+  const matchRef = findMatch(id);
+  if (!matchRef) return false;
+  const revision = (state.pollRevision.get(id) || 0) + 1;
+  state.pollRevision.set(id, revision);
+  const previousEvent = state.events.get(id);
   const oddsDue = shouldPollLiveOdds(id);
-  const [evRes, stRes, oddsRes] = await Promise.all([
-    api(`event/${id}`).catch(() => undefined),
-    api(`event/${id}/statistics`).catch(() => undefined),
-    oddsDue ? api(`event/${id}/odds/1/all`).catch(() => undefined) : undefined,
-    needsPlayers(id) ? loadPlayers(id) : null,
+  const capture = (path) => api(path)
+    .then((value) => value === null ? { kind: 'not-found' } : { kind: 'success', value })
+    .catch((error) => ({ kind: 'failed', error }));
+  const [eventResponse, statsResponse, oddsResponse] = await Promise.all([
+    capture(`event/${id}`),
+    capture(`event/${id}/statistics`),
+    oddsDue ? capture(`event/${id}/odds/1/all`) : null,
+    needsPlayers(id) ? loadPlayers(id).catch(() => null) : null,
   ]);
-  if (!findMatch(id)) return true;
-  if (evRes?.event) state.events.set(id, evRes.event);
+  if (state.pollRevision.get(id) !== revision || findMatch(id) !== matchRef) return false;
+
+  const eventResult = LiveAnalysisState.classifyApiResponse(eventResponse, 'event', id);
+  const statsResult = LiveAnalysisState.classifyApiResponse(statsResponse, 'statistics', id);
+  const previousIdentity = previousEvent && LiveAnalysisState.matchIdentity(previousEvent, id);
+  const nextIdentity = eventResult.kind === 'complete'
+    ? LiveAnalysisState.matchIdentity(eventResult.event, id) : previousIdentity;
+  const previousScore = LiveAnalysisState.scorePair(previousEvent);
+  const nextScore = eventResult.kind === 'complete' ? LiveAnalysisState.scorePair(eventResult.event) : previousScore;
+  const scoreChanged = !!previousScore && !!nextScore
+    && (previousScore[0] !== nextScore[0] || previousScore[1] !== nextScore[1]);
+  const eventReset = eventResult.kind === 'complete' && previousEvent && (
+    previousIdentity !== nextIdentity
+    || previousEvent.status?.type !== eventResult.event.status?.type
+    || previousEvent.status?.code !== eventResult.event.status?.code
+    || scoreChanged
+  );
+  if (eventResult.kind === 'complete') {
+    if (eventReset) {
+      forgetAnalysis(id);
+      if (previousIdentity !== nextIdentity) state.stats.delete(id);
+    }
+    state.events.set(id, eventResult.event);
+  }
+
   const currentEvent = state.events.get(id);
-  const phaseChanged = previousPhaseCode != null && currentEvent?.status?.code !== previousPhaseCode;
-  if (phaseChanged) {
-    state.liveOdds.delete(id);
-    state.lastOddsPoll.delete(id);
+  let oddsResult = oddsResponse
+    ? oddsResponse.kind === 'success' ? { kind: 'complete', value: oddsResponse.value } : oddsResponse
+    : { kind: 'skipped' };
+  if (!oddsDue && !eventReset) {
+    oddsResult = { kind: state.apiStatus.get(id)?.odds || 'skipped' };
   }
-  if (stRes) state.stats.set(id, parseStats(stRes));
-  else if (stRes === null && currentEvent?.status?.type !== 'notstarted') {
-    state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
+  if (statsResult.kind === 'complete') state.stats.set(id, parseStats(statsResult.value));
+  const liveOddsPhase = isLive(currentEvent) && [6, 7, 41, 42].includes(currentEvent.status?.code);
+  if (oddsDue && oddsResult.kind === 'complete'
+    && (eventReset || eventResult.kind !== 'complete' || !liveOddsPhase)) {
+    oddsResult = { kind: 'skipped' };
   }
-  const liveOddsPhase = isLive(currentEvent) && [6, 7].includes(currentEvent.status?.code);
-  if (oddsDue && !phaseChanged && oddsRes && liveOddsPhase) {
-    recordLiveOddsSnapshot(id, oddsRes);
+  if (oddsDue && !eventReset && eventResult.kind === 'complete'
+    && oddsResult.kind === 'complete' && liveOddsPhase) {
+    const recorded = recordLiveOddsSnapshot(id, oddsResult.value, currentEvent);
+    if (!recorded) {
+      const shape = LiveAnalysisState.classifyOddsResponse(oddsResponse);
+      oddsResult = { kind: shape.kind === 'complete' ? 'empty' : shape.kind };
+    }
     state.lastOddsPoll.set(id, Date.now());
   }
+  state.apiStatus.set(id, {
+    event: eventResult.kind, statistics: statsResult.kind, odds: oddsResult.kind, at: Date.now(),
+  });
   if (!liveOddsPhase) state.liveOdds.delete(id);
-  recordAnalysisSnapshot(id, stRes !== undefined);
-  if (evRes !== undefined) state.lastPoll.set(id, Date.now());
+  recordAnalysisSnapshot(id, eventResult.kind === 'complete' && statsResult.kind === 'complete');
+  if (eventResult.kind === 'complete') state.lastPoll.set(id, Date.now());
   updateTile(id);
   checkAlerts(id);
-  return evRes !== undefined;
+  return eventResult.kind === 'complete';
 }
 
 let polling = false;

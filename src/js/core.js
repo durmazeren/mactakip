@@ -41,6 +41,8 @@ const state = {
   events: new Map(),                 // id -> son event verisi
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
   liveOdds: new Map(),               // id -> son canlı fiyatlar; API zaman damgası doğrulanmadan model teyidi sayılmaz
+  apiStatus: new Map(),              // id -> event/statistics/odds yanıtlarının ayrı sağlık durumu
+  pollRevision: new Map(),           // id -> eski/in-flight yanıtların yeni maça yazılmasını engeller
   lastPoll: new Map(),               // id -> son sorgu zamanı (ms)
   lastOddsPoll: new Map(),           // id -> son canlı oran sorgusu zamanı (ms)
   tiles: new Map(),                  // id -> animasyon kutusu durumu
@@ -123,7 +125,8 @@ function minuteText(ev) {
 
 function scoreText(ev) {
   if (!ev || ev.status?.type === 'notstarted') return '–';
-  return `${ev.homeScore?.current ?? 0} - ${ev.awayScore?.current ?? 0}`;
+  const score = globalThis.LiveAnalysisState?.scorePair(ev);
+  return score ? `${score[0]} - ${score[1]}` : 'Skor –';
 }
 
 // İstatistikler: toplam şut, isabetli şut, korner (periyot bazında)
@@ -132,12 +135,14 @@ function parseStats(json) {
   const numberValue = (value) => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : null;
     if (typeof value !== 'string') return null;
-    const parsed = Number.parseFloat(value.replace(',', '.'));
+    const parsed = Number(value.trim().replace('%', '').replace(',', '.'));
     return Number.isFinite(parsed) ? parsed : null;
   };
 
   for (const block of json?.statistics || []) {
-    const items = (block.groups || []).flatMap((g) => g.statisticsItems || []);
+    if (!block || typeof block.period !== 'string' || !Array.isArray(block.groups)) continue;
+    const items = block.groups.flatMap((group) =>
+      Array.isArray(group?.statisticsItems) ? group.statisticsItems.filter((item) => item && typeof item === 'object') : []);
     const pick = (key) => {
       const it = items.find((i) => i.key === key);
       if (!it) return null;

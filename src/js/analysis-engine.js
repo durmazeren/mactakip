@@ -8,8 +8,6 @@
   root.AnalysisEngine = engine;
   if (typeof module === 'object' && module.exports) module.exports = engine;
 }(globalThis, (oddsEngine) => {
-  const FIRST_HALF_END_MINUTE = 49; // regulation half plus a fixed 4-minute stoppage allowance
-  const REGULATION_END_MINUTE = 94; // regulation match plus a fixed 4-minute stoppage allowance
   const OVER_DIRECTION_THRESHOLD = 0.62;
   const UNDER_DIRECTION_THRESHOLD = 0.70;
   const BTTS_YES_DIRECTION_THRESHOLD = 0.60;
@@ -36,6 +34,81 @@
     if (!Number.isFinite(data.elapsedMs)) return 1;
     const windowMinutes = Math.min(5, Math.max(3, data.elapsedMs / 60_000));
     return 5 / windowMinutes;
+  }
+
+  function eventRegime(data) {
+    const xg = validPair(data?.changes?.xg);
+    const windowMinutes = Math.max(3, (data?.elapsedMs || 0) / 60_000);
+    const cumulative = validPair(data?.cumulativeXg);
+    const minute = Number.isFinite(data?.minute) ? Math.max(1, data.minute) : null;
+    const recentRate = xg ? (xg[0] + xg[1]) / windowMinutes : null;
+    const matchRate = cumulative && minute ? (cumulative[0] + cumulative[1]) / minute : null;
+    const ratio = Number.isFinite(recentRate) && Number.isFinite(matchRate)
+      ? recentRate / Math.max(0.035, matchRate) : null;
+    const pressure = (Number(data?.totalSot) || 0) * 1.5
+      + (Number(data?.totalShots) || 0) * 0.25
+      + (Number(data?.totalBigChances) || 0) * 1.2;
+    if (!Number.isFinite(ratio)) {
+      return { key: 'insufficient', label: 'Yetersiz veri', ratio: null, volatility: 0.24, quality: 0.35 };
+    }
+    if (ratio >= 2 && (recentRate >= 0.12 || data?.totalBigChances >= 1)) {
+      return { key: 'surge', label: 'Baskı artışı', ratio, volatility: 0.28, quality: 0.72 };
+    }
+    if (ratio <= 0.35 && matchRate >= 0.04 && pressure <= 3) {
+      return { key: 'cooldown', label: 'Tempo düşüşü', ratio, volatility: 0.12, quality: 0.78 };
+    }
+    if (ratio >= 1.55 || ratio <= 0.55) {
+      return { key: 'transition', label: 'Oyun rejimi değişiyor', ratio, volatility: 0.38, quality: 0.52 };
+    }
+    return { key: 'balanced', label: 'Dengeli tempo', ratio, volatility: 0.08, quality: 0.88 };
+  }
+
+  function dataQualityScore(data) {
+    const freshness = Number.isFinite(data?.dataAgeMs)
+      ? Math.max(0, 1 - data.dataAgeMs / 35_000) : 0.65;
+    const window = Number.isFinite(data?.elapsedMs) ? Math.min(1, Math.max(0, data.elapsedMs / 300_000)) : 0;
+    const stats = data?.changes || {};
+    const requiredCoverage = ['shots', 'sot', 'corners'].filter((key) => validPair(stats[key])).length / 3;
+    const hasXg = !!(validPair(stats.xg) && validPair(data?.cumulativeXg));
+    const clock = data?.clock?.known === true;
+    const scoreKnown = !!validPair(data?.score);
+    const sampleCoverage = Number.isFinite(data?.sampleCount) ? Math.min(1, data.sampleCount / 12) : 0.75;
+    const regime = eventRegime(data);
+    const total = freshness * 25 + window * 20 + requiredCoverage * 15
+      + (hasXg ? 15 : 0) + (clock ? 10 : 0) + (scoreKnown ? 5 : 0)
+      + sampleCoverage * 5 + regime.quality * 5;
+    return Math.round(Math.max(0, Math.min(100, total)));
+  }
+
+  function dynamicThreshold(data, base) {
+    const qualityPenalty = (100 - dataQualityScore(data)) * 0.0014;
+    const regimePenalty = eventRegime(data).volatility * 0.04;
+    return Math.min(0.97, base + qualityPenalty + regimePenalty);
+  }
+
+  function bounded(value, min = 0, max = 1) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function nextGoalProbabilities(data, horizonMinutes = 8) {
+    const rates = validPair(data?.weightedXgRate)
+      || (validPair(data?.changes?.xg)
+        ? data.changes.xg.map((value) => value / Math.max(3, (data.elapsedMs || 0) / 60_000))
+        : null);
+    if (!rates) return null;
+    const shots = validPair(data?.changes?.shots) || [0, 0];
+    const sot = validPair(data?.changes?.sot) || [0, 0];
+    const bigChances = validPair(data?.changes?.bigChances) || [0, 0];
+    const hazards = rates.map((rate, side) => Math.min(0.12, Math.max(0.002,
+      rate + Math.max(0, shots[side]) * 0.002 + Math.max(0, sot[side]) * 0.01
+        + Math.max(0, bigChances[side]) * 0.025)));
+    const total = hazards[0] + hazards[1];
+    const goalWithinWindow = 1 - Math.exp(-total * horizonMinutes);
+    return {
+      home: goalWithinWindow * hazards[0] / total,
+      away: goalWithinWindow * hazards[1] / total,
+      none: 1 - goalWithinWindow,
+    };
   }
 
   function teamPressure(data, side) {
@@ -65,8 +138,10 @@
 
   function remainingXg(data, endMinute) {
     const current = validPair(data.cumulativeXg);
-    if (!current || data.minute < 10 || data.minute >= endMinute || data.elapsedMs < 180_000) return null;
+    if (!current || !Number.isFinite(data.minute) || !Number.isFinite(endMinute)
+      || data.minute < 10 || data.minute >= endMinute || data.elapsedMs < 180_000) return null;
     const recent = validPair(data.changes.xg);
+    const weighted = validPair(data.weightedXgRate);
     const played = Math.max(10, data.minute);
     const windowMinutes = Math.max(3, data.elapsedMs / 60_000);
     const left = Math.max(0, endMinute - data.minute);
@@ -74,11 +149,12 @@
     return current.map((xg, side) => {
       const matchRate = Math.max(0, xg / played);
       let remaining = matchRate * left;
-      if (recent) {
-        const recentRate = Math.max(0, recent[side] / windowMinutes);
+      if (weighted || recent) {
+        const recentRate = Math.max(0, weighted ? weighted[side] : recent[side] / windowMinutes);
         // Cap a short xG burst before blending it with the match-long pace.
         const cappedRecent = Math.min(recentRate, Math.max(0.04, matchRate * 2.5));
-        remaining = (matchRate * 0.75 + cappedRecent * 0.25) * left;
+        const recentWeight = weighted ? 0.40 : 0.25;
+        remaining = (matchRate * (1 - recentWeight) + cappedRecent * recentWeight) * left;
       }
       if (redCards) {
         const ownRedCards = Math.max(0, Math.min(2, redCards[side]));
@@ -105,7 +181,7 @@
       // A wider fixed band represents weaker evidence; it is not a calibrated interval.
       const disagreement = recentRate == null ? 0.30
         : Math.abs(recentRate - matchRate) / Math.max(0.08, matchRate, recentRate);
-      const spread = Math.min(0.55, 0.18 + disagreement * 0.12);
+      const spread = Math.min(0.62, 0.14 + disagreement * 0.12 + eventRegime(data).volatility * 0.10);
       low.push(Math.max(0, base[side] * (1 - spread)));
       high.push(base[side] * (1 + spread));
     }
@@ -165,8 +241,11 @@
     return poissonCdf(Math.floor(line) - currentGoals, lambda);
   }
 
-  function pushRemainderResult(candidates, data, scenarios) {
-    if (data.minute < 18 || data.minute > 80) return;
+  function pushRemainderResult(candidates, data, scenarios, requestedEndMinute) {
+    const endMinute = Number.isFinite(requestedEndMinute) ? requestedEndMinute
+      : Number.isFinite(data.clock?.matchEndMinute) ? data.clock.matchEndMinute
+        : Number.isFinite(data.clock?.endMinute) ? data.clock.endMinute : 90;
+    if (!Number.isFinite(data.minute) || data.minute < 18 || data.minute >= endMinute - 2) return;
     const combinations = [
       [scenarios.low[0], scenarios.low[1]],
       [scenarios.low[0], scenarios.high[1]],
@@ -181,9 +260,9 @@
     const top = Math.min(...winners.map((sorted) => sorted[0][1]));
     const margin = Math.min(...winners.map((sorted) => sorted[0][1] - sorted[1][1]));
     const lambdaSum = scenarios.base[0] + scenarios.base[1];
-    if (winner === 'draw') {
-      if (top < 0.60 || lambdaSum < 0.15) return;
-    } else if (top < 0.52 || margin < 0.10 || lambdaSum < 0.3) {
+    const baseThreshold = winner === 'draw' ? 0.60 : 0.52;
+    if (top < dynamicThreshold(data, baseThreshold) || lambdaSum < (winner === 'draw' ? 0.15 : 0.3)
+      || (winner !== 'draw' && margin < 0.10)) {
       return;
     }
 
@@ -195,6 +274,8 @@
       level: top >= 0.68 && data.elapsedMs >= 240_000 ? 'high' : 'medium',
       levelLabel: top >= 0.68 ? 'Model yönü güçlü' : 'Model yönü',
       side: winner === 'draw' ? null : winner === 'home' ? 0 : 1,
+      modelProbability: top, minimumProbability: baseThreshold,
+      marketIdentity: { market: 'remaining-result', period: 'remaining', line: null, selection: winner },
       reason: `Ev/deplasman xG tempo aralığının dört uç senaryosunda da yön değişmedi; mevcut skor hesaba katılmaz. Bu, kalibre edilmiş olasılık veya bahis oranı değildir.`,
     });
   }
@@ -221,22 +302,28 @@
       && (!Number.isFinite(shots) || shots <= 3)
       && (!Number.isFinite(xg) || xg <= 0.08);
 
-    if (data.minute >= 12 && overChance >= OVER_DIRECTION_THRESHOLD && windowGoalSupport) {
+    const overThreshold = dynamicThreshold(data, OVER_DIRECTION_THRESHOLD);
+    const underThreshold = dynamicThreshold(data, UNDER_DIRECTION_THRESHOLD);
+    if (data.minute >= 12 && overChance >= overThreshold && windowGoalSupport) {
       const level = overChance >= 0.78 && data.elapsedMs >= 240_000 ? 'high' : 'medium';
       candidates.push({
         key: `${keyPrefix}-over-${lineKey(line)}`, icon: '↗',
         title: `${label} ${line} üst yönü`,
         market: `${label} toplam gol · üst ${line}`,
         level, levelLabel: level === 'high' ? 'xG yönü güçlü' : 'xG yönü', side: null,
+        modelProbability: overChance, minimumProbability: OVER_DIRECTION_THRESHOLD,
+        marketIdentity: { market: 'total-goals', period: half ? 'first-half' : 'match', line, selection: 'over' },
         reason: `Düşük tempo senaryosunda bile Poisson üst yön eşiği aşılıyor; temel tahmin ${forecast.toFixed(1)} gol, son pencerede ${Number.isFinite(sot) ? sot : '—'} isabetli şut ve ${Number.isFinite(xg) ? xg.toFixed(2) : '—'} xG artışı var.`,
       });
-    } else if (data.minute >= underStart && underChance >= UNDER_DIRECTION_THRESHOLD && quietWindow) {
+    } else if (data.minute >= underStart && underChance >= underThreshold && quietWindow) {
       candidates.push({
         key: `${keyPrefix}-under-${lineKey(line)}`, icon: '↘',
         title: `${label} ${line} alt yönü`,
         market: `${label} toplam gol · alt ${line}`,
         level: underChance >= 0.85 && data.elapsedMs >= 240_000 ? 'high' : 'medium',
         levelLabel: underChance >= 0.85 ? 'xG yönü güçlü' : 'xG yönü', side: null,
+        modelProbability: underChance, minimumProbability: UNDER_DIRECTION_THRESHOLD,
+        marketIdentity: { market: 'total-goals', period: half ? 'first-half' : 'match', line, selection: 'under' },
         reason: `Yüksek tempo senaryosunda bile Poisson alt yön eşiği korunuyor; temel tahmin ${forecast.toFixed(1)} gol ve son pencerede belirgin şut/xG artışı yok.`,
       });
     }
@@ -257,11 +344,15 @@
       && ((recentXg && recentXg[side] >= 0.08)
         || (currentXg && currentXg[side] >= 0.18)
         || (recentSot && recentSot[side] >= 1)));
-    if (yesChance >= BTTS_YES_DIRECTION_THRESHOLD && allHaveScoringPressure) {
+    const yesThreshold = dynamicThreshold(data, BTTS_YES_DIRECTION_THRESHOLD);
+    const noThreshold = dynamicThreshold(data, BTTS_NO_DIRECTION_THRESHOLD);
+    if (yesChance >= yesThreshold && allHaveScoringPressure) {
       candidates.push({
         key: `${prefix}-yes`, icon: '⚽', title: `${label} Evet yönü`,
         market: half ? 'İlk yarı karşılıklı gol' : 'Karşılıklı gol',
         level: 'medium', levelLabel: 'xG yönü', side: null,
+        modelProbability: yesChance, minimumProbability: BTTS_YES_DIRECTION_THRESHOLD,
+        marketIdentity: { market: 'btts', period: half ? 'first-half' : 'match', line: null, selection: 'yes' },
         reason: `Düşük tempo senaryosunda henüz golü olmayan taraf(lar)ın xG uzatımı ${unscored.map((side) => `${data.names[side]} ${scenarios.low[side].toFixed(2)}`).join(' · ')}; şut/xG desteği mevcut.`,
       });
       return;
@@ -269,11 +360,14 @@
 
     const highYesChance = unscored.reduce((chance, side) => chance * (1 - Math.exp(-Math.min(12, scenarios.high[side]))), 1);
     const noChanceSide = unscored.find((side) => scenarios.high[side] <= (half ? 0.06 : 0.10));
-    if (data.minute >= minuteFloor && highYesChance <= 1 - BTTS_NO_DIRECTION_THRESHOLD && noChanceSide != null) {
+    const noChance = 1 - highYesChance;
+    if (data.minute >= minuteFloor && noChance >= noThreshold && noChanceSide != null) {
       candidates.push({
         key: `${prefix}-no`, icon: '⏸', title: `${label} Hayır yönü`,
         market: half ? 'İlk yarı karşılıklı gol' : 'Karşılıklı gol',
         level: 'medium', levelLabel: 'xG yönü', side: noChanceSide,
+        modelProbability: noChance, minimumProbability: BTTS_NO_DIRECTION_THRESHOLD,
+        marketIdentity: { market: 'btts', period: half ? 'first-half' : 'match', line: null, selection: 'no' },
         reason: `${data.names[noChanceSide]} henüz gol bulmadı; yüksek tempo senaryosunda bile KG Evet yönü eşiğin altında ve kalan xG uzatımı ${scenarios.high[noChanceSide].toFixed(2)}.`,
       });
     }
@@ -283,29 +377,48 @@
     const candidates = [];
     const regularFirstHalf = data.phase === '1Y';
     const regularMatch = regularFirstHalf || data.phase === '2Y';
+    const supportedLivePhase = ['1Y', '2Y', 'UZ1', 'UZ2'].includes(data.phase);
+    const periodEnd = Number.isFinite(data.clock?.endMinute)
+      ? data.clock.endMinute : ({ '1Y': 45, '2Y': 90, UZ1: 105, UZ2: 120 }[data.phase]);
+    const matchEnd = Number.isFinite(data.clock?.matchEndMinute)
+      ? data.clock.matchEndMinute : ({ '1Y': 90, '2Y': 90, UZ1: 120, UZ2: 120 }[data.phase]);
+    if (!supportedLivePhase || !Number.isFinite(data.minute)) return candidates;
 
-    if (data.minute >= 8 && data.minute <= 86) {
-      const next = dominantSide(data, { minimum: 2.5, margin: 1.35 });
+    if (data.minute >= 8 && data.minute < periodEnd) {
+      const quality = dataQualityScore(data);
+      const next = dominantSide(data, {
+        minimum: 2.5 + Math.max(0, 75 - quality) * 0.025,
+        margin: 1.35 + Math.max(0, 75 - quality) * 0.015,
+      });
       if (next) {
         const name = data.names[next.side];
         const shots = data.changes.shots?.[next.side];
         const sot = data.changes.sot?.[next.side];
         const xg = data.changes.xg?.[next.side];
+        const nextProbabilities = nextGoalProbabilities(data);
         candidates.push({
           key: `next-goal-${next.side === 0 ? 'home' : 'away'}`, icon: '⚽',
           title: `Sıradaki gol yönü: ${name}`,
           market: 'Sıradaki golü hangi takım atar?', level: next.lead >= 4 && data.elapsedMs >= 240_000 ? 'high' : 'medium',
           side: next.side,
+          modelProbability: nextProbabilities?.[next.side === 0 ? 'home' : 'away'] ?? null,
+          minimumProbability: 0.08,
+          marketIdentity: { market: 'next-goal', period: 'next', line: null, selection: next.side === 0 ? 'home' : 'away' },
           reason: `${name} son pencerede ${Number.isFinite(shots) ? shots : 0} şut, ${Number.isFinite(sot) ? sot : 0} isabetli şut${Number.isFinite(xg) ? ` ve ${xg.toFixed(2)} xG` : ''} ile daha yüksek hücum baskısı kurdu.`,
         });
       }
 
     }
 
-    if (!regularMatch || data.minute < 12) return candidates;
-    const matchScenarios = remainingXgScenarios(data, REGULATION_END_MINUTE);
+    if (data.minute < 12) return candidates;
+    if (!regularMatch) {
+      const extraTimeScenarios = remainingXgScenarios(data, periodEnd);
+      if (extraTimeScenarios) pushRemainderResult(candidates, data, extraTimeScenarios, periodEnd);
+      return candidates;
+    }
+    const matchScenarios = remainingXgScenarios(data, matchEnd);
     if (!matchScenarios) return candidates;
-    if (data.minute >= 18 && data.minute <= 80) pushRemainderResult(candidates, data, matchScenarios);
+    if (data.minute >= 18) pushRemainderResult(candidates, data, matchScenarios, matchEnd);
     const score = validPair(data.score);
     if (!score) return candidates;
     const currentTotal = score[0] + score[1];
@@ -321,7 +434,7 @@
     });
 
     if (regularFirstHalf) {
-      const halfScenarios = remainingXgScenarios(data, FIRST_HALF_END_MINUTE);
+      const halfScenarios = remainingXgScenarios(data, periodEnd);
       if (halfScenarios) {
         const halfForecast = currentTotal + halfScenarios.base[0] + halfScenarios.base[1];
         pushLineSignal(candidates, data, {
@@ -415,17 +528,48 @@
       firstHalfTotal: [0.5, 1.5, 2.5].includes(Number(lines.firstHalfTotal)) ? Number(lines.firstHalfTotal) : 1.5,
     };
     candidates.push(...makeMarketCandidates(data, safeLines));
+    const quality = dataQualityScore(data);
+    const regime = eventRegime(data);
     const oddsConfirmed = [];
     for (const candidate of candidates) {
       candidate.group = /^(next-goal-|rest-result-|btts-|half-btts-|match-|half-)/.test(candidate.key)
         ? 'market' : 'activity';
-      const evidence = oddsEngine?.confirmation(data.liveOdds, candidate.key, data.analysisNowMs);
-      if (evidence?.verified && !evidence.supported) continue;
-      if (evidence?.verified) candidate.oddsEvidence = evidence;
+      if (candidate.group === 'market' && quality < 42) continue;
+      const threshold = Number.isFinite(candidate.minimumProbability)
+        ? dynamicThreshold(data, candidate.minimumProbability) : null;
+      if (Number.isFinite(candidate.modelProbability) && Number.isFinite(threshold)
+        && candidate.modelProbability < threshold) continue;
+      candidate.dataQualityScore = quality;
+      candidate.dynamicThreshold = threshold;
+      const probabilityMargin = Number.isFinite(candidate.modelProbability) && Number.isFinite(threshold)
+        ? bounded((candidate.modelProbability - threshold) / Math.max(0.03, 1 - threshold))
+        : (candidate.level === 'high' ? 0.82 : 0.58);
+      candidate.confidenceScore = Math.round(quality * (0.65 + 0.20 * probabilityMargin + 0.15 * regime.quality));
+      candidate.regime = regime.key;
+      candidate.valueEligible = false;
+      if (candidate.group === 'market' && candidate.marketIdentity && Number.isFinite(candidate.modelProbability)) {
+        const assessment = oddsEngine?.marketAssessment(
+          data.liveOdds, candidate.key, candidate.modelProbability,
+          data.analysisNowMs, data.eventIdentity,
+        );
+        if (assessment?.verified) {
+          candidate.oddsEvidence = assessment;
+          candidate.valueEligible = quality >= 68 && assessment.edge >= Math.max(0.03, (100 - quality) * 0.0005)
+            && assessment.expectedValue >= 0.02;
+        }
+      }
+      const edgeRank = Number.isFinite(candidate.oddsEvidence?.edge)
+        ? Math.max(-0.25, Math.min(0.25, candidate.oddsEvidence.edge)) * 80 : 0;
+      candidate.rankingScore = candidate.confidenceScore
+        + (candidate.valueEligible ? 60 : 0) + edgeRank;
       oddsConfirmed.push(candidate);
     }
-    return oddsConfirmed;
+    return oddsConfirmed.sort((a, b) => b.rankingScore - a.rankingScore);
   }
 
-  return { ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes };
+  return {
+    ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios,
+    scenarioBand, poissonOutcomes, eventRegime, dataQualityScore, dynamicThreshold,
+    nextGoalProbabilities,
+  };
 }));

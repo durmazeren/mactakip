@@ -134,18 +134,31 @@
     return Object.fromEntries(Object.entries(implied).map(([key, value]) => [key, value / total]));
   }
 
-  function quote(prices, updatedAt, observedAt) {
+  function quote(prices, updatedAt, observedAt, identity, eventIdentity) {
     const fair = fairValues(prices);
     if (!fair || Object.keys(prices).length < 2) return null;
+    const implied = Object.fromEntries(Object.entries(prices).map(([side, price]) => [side, 1 / price]));
     return {
-      prices, fair, updatedAt, sourceTimestampKnown: updatedAt != null,
+      prices, implied, fair,
+      fairOdds: Object.fromEntries(Object.entries(fair).map(([side, probability]) => [side, 1 / probability])),
+      identity: { ...identity }, eventIdentity,
+      updatedAt, sourceTimestampKnown: updatedAt != null,
       observedAt, movement: null, liveEvent: true,
     };
   }
 
-  function addPair(target, key, prices, updatedAt, observedAt) {
-    const pair = quote(prices, updatedAt, observedAt);
+  function addPair(target, key, prices, updatedAt, observedAt, identity, eventIdentity) {
+    const pair = quote(prices, updatedAt, observedAt, identity, eventIdentity);
     if (pair) target[key] = pair;
+  }
+
+  function marketMetadata(market) {
+    const provider = market?.provider || market?.bookmaker || {};
+    return {
+      marketId: market?.marketId ?? market?.id ?? null,
+      bookmakerId: market?.bookmakerId ?? market?.providerId ?? provider?.id ?? null,
+      bookmakerName: market?.bookmakerName ?? market?.providerName ?? provider?.name ?? null,
+    };
   }
 
   function allMarkets(payload) {
@@ -156,7 +169,7 @@
     return [];
   }
 
-  function parseSnapshot(payload, { eventLive = false, observedAt = Date.now() } = {}) {
+  function parseSnapshot(payload, { eventLive = false, observedAt = Date.now(), eventIdentity = null } = {}) {
     if (!eventLive || !payload || typeof payload !== 'object') return null;
     const markets = {
       matchTotals: {}, firstHalfTotals: {}, matchBtts: null, firstHalfBtts: null,
@@ -169,6 +182,7 @@
       const normalizedTitle = normalize(title);
       const half = isFirstHalf(title);
       const updatedAt = sourceTimestamp(market, payload, observedAt);
+      const metadata = marketMetadata(market);
       const choices = choicesOf(market).filter((choice) => !suspended(choice) && priceOf(choice) != null);
       if (choices.length < 2) continue;
 
@@ -178,7 +192,9 @@
           const side = yesNoSide(choice.name ?? choice.label ?? choice.selectionName);
           if (side) prices[side] = priceOf(choice);
         }
-        const pair = quote(prices, updatedAt, observedAt);
+        const pair = quote(prices, updatedAt, observedAt, {
+          market: 'btts', period: half ? 'first-half' : 'match', line: null, ...metadata,
+        }, eventIdentity);
         if (pair) {
           if (half) markets.firstHalfBtts = pair;
           else markets.matchBtts = pair;
@@ -192,7 +208,9 @@
           const side = nextGoalSide(choice.name ?? choice.label ?? choice.selectionName);
           if (side) prices[side] = priceOf(choice);
         }
-        const parsed = quote(prices, updatedAt, observedAt);
+        const parsed = quote(prices, updatedAt, observedAt, {
+          market: 'next-goal', period: 'next', line: null, ...metadata,
+        }, eventIdentity);
         if (parsed) markets.nextGoal = parsed;
         continue;
       }
@@ -203,7 +221,9 @@
           const side = resultSide(choice.name ?? choice.label ?? choice.selectionName);
           if (side) prices[side] = priceOf(choice);
         }
-        const parsed = quote(prices, updatedAt, observedAt);
+        const parsed = quote(prices, updatedAt, observedAt, {
+          market: 'remaining-result', period: 'remaining', line: null, ...metadata,
+        }, eventIdentity);
         if (parsed) markets.remainingResult = parsed;
         continue;
       }
@@ -223,13 +243,15 @@
         lines.get(key)[side] = priceOf(choice);
       }
       const destination = half ? markets.firstHalfTotals : markets.matchTotals;
-      for (const [line, prices] of lines) addPair(destination, line, prices, updatedAt, observedAt);
+      for (const [line, prices] of lines) addPair(destination, line, prices, updatedAt, observedAt, {
+        market: 'total-goals', period: half ? 'first-half' : 'match', line, ...metadata,
+      }, eventIdentity);
     }
 
     const count = Object.keys(markets.matchTotals).length + Object.keys(markets.firstHalfTotals).length
       + Number(!!markets.matchBtts) + Number(!!markets.firstHalfBtts)
       + Number(!!markets.nextGoal) + Number(!!markets.remainingResult);
-    return count ? { observedAt, liveEvent: true, markets } : null;
+    return count ? { observedAt, liveEvent: true, eventIdentity, markets } : null;
   }
 
   function eachQuote(snapshot, callback) {
@@ -289,15 +311,59 @@
       return {
         quote: match[1] === 'half' ? snapshot?.markets?.firstHalfTotals?.[line] : snapshot?.markets?.matchTotals?.[line],
         side: match[2],
+        identity: { market: 'total-goals', period: match[1] === 'half' ? 'first-half' : 'match', line, selection: match[2] },
       };
     }
     match = key.match(/^(half-)?btts-(yes|no)$/);
-    if (match) return { quote: match[1] ? snapshot?.markets?.firstHalfBtts : snapshot?.markets?.matchBtts, side: match[2] };
+    if (match) return {
+      quote: match[1] ? snapshot?.markets?.firstHalfBtts : snapshot?.markets?.matchBtts,
+      side: match[2],
+      identity: { market: 'btts', period: match[1] ? 'first-half' : 'match', line: null, selection: match[2] },
+    };
     match = key.match(/^next-goal-(home|away)$/);
-    if (match) return { quote: snapshot?.markets?.nextGoal, side: match[1] };
+    if (match) return {
+      quote: snapshot?.markets?.nextGoal, side: match[1],
+      identity: { market: 'next-goal', period: 'next', line: null, selection: match[1] },
+    };
     match = key.match(/^rest-result-(home|away|draw)$/);
-    if (match) return { quote: snapshot?.markets?.remainingResult, side: match[1] };
+    if (match) return {
+      quote: snapshot?.markets?.remainingResult, side: match[1],
+      identity: { market: 'remaining-result', period: 'remaining', line: null, selection: match[1] },
+    };
     return null;
+  }
+
+  function marketAssessment(snapshot, key, modelProbability, now = Date.now(), expectedEventIdentity) {
+    const selected = marketForSignal(snapshot, key);
+    if (!selected?.quote || !Number.isFinite(modelProbability) || modelProbability <= 0 || modelProbability >= 1) return null;
+    const quoteValue = selected.quote;
+    const price = quoteValue.prices?.[selected.side];
+    const fairProbability = quoteValue.fair?.[selected.side];
+    const rawProbability = quoteValue.implied?.[selected.side];
+    const identityMatches = selected.identity && quoteValue.identity
+      && ['market', 'period', 'line'].every((name) => quoteValue.identity[name] === selected.identity[name])
+      && Object.prototype.hasOwnProperty.call(quoteValue.prices || {}, selected.side);
+    const eventMatches = expectedEventIdentity == null || snapshot.eventIdentity === expectedEventIdentity;
+    const verified = sourceFresh(quoteValue, now) && identityMatches && eventMatches
+      && Number.isFinite(price) && Number.isFinite(fairProbability) && Number.isFinite(rawProbability);
+    if (!verified) return {
+      verified: false, reason: !eventMatches ? 'event-mismatch' : !identityMatches ? 'market-identity-mismatch' : 'stale-or-incomplete',
+      identity: quoteValue.identity || null,
+    };
+    const edge = modelProbability - fairProbability;
+    const expectedValue = modelProbability * price - 1;
+    return {
+      verified: true, provider: quoteValue.identity.bookmakerName || null,
+      marketId: quoteValue.identity.marketId ?? null,
+      identity: quoteValue.identity,
+      price, impliedProbability: rawProbability, fairMarketProbability: fairProbability,
+      marketFairOdds: quoteValue.fairOdds?.[selected.side] ?? null,
+      modelProbability, modelFairOdds: 1 / modelProbability,
+      edge, expectedValue,
+      valueEligible: edge >= 0.03 && expectedValue >= 0.02,
+      updatedAt: quoteValue.updatedAt, observedAt: quoteValue.observedAt,
+      movement: quoteValue.movement?.[selected.side] ?? null,
+    };
   }
 
   function confirmation(snapshot, key, now = Date.now()) {
@@ -334,6 +400,6 @@
 
   return {
     MAX_SOURCE_AGE_MS, MARKET_DIRECTION_FLOOR,
-    parseSnapshot, withMovement, confirmation, summary, sourceFresh,
+    parseSnapshot, withMovement, confirmation, marketAssessment, summary, sourceFresh,
   };
 }));

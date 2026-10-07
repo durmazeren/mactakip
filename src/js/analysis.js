@@ -21,14 +21,11 @@ const analysisHistory = new Map();
 const analysisConfirmations = new Map();
 
 function analysisPhase(ev) {
-  const code = ev?.status?.code;
-  return ({ 6: '1Y', 31: 'İY', 7: '2Y', 41: 'UZ1', 42: 'UZ2', 50: 'PEN' })[code]
-    || `P${code ?? 'BİLİNMİYOR'}`;
+  return LiveAnalysisState.phaseForEvent(ev);
 }
 
-function analysisMinute(ev) {
-  const match = minuteText(ev).match(/^(\d+)(?:\+(\d+))?/);
-  return match ? Number(match[1]) + Number(match[2] || 0) : 0;
+function analysisMinute(ev, now = Date.now()) {
+  return LiveAnalysisState.matchClock(ev, now).minute;
 }
 
 function validPair(pair) {
@@ -50,8 +47,29 @@ function analysisSnapshot(id, now) {
   if (!isLive(ev)) return { status: 'inactive', ev };
   if (ev.status?.code === 31) return { status: 'halftime', ev };
   const currentStats = state.stats.get(id);
-  if (!currentStats || currentStats.none || !currentStats.ALL) return { status: 'nodata', ev };
-  if (!history.length) return { status: 'warming', ev, elapsedMs: 0 };
+  const apiStatus = state.apiStatus.get(id) || null;
+  if (apiStatus) {
+    if ([apiStatus.event, apiStatus.statistics].includes('failed')) return { status: 'api-failed', ev, apiStatus };
+    if (['partial', 'invalid', 'mismatch'].some((kind) => [apiStatus.event, apiStatus.statistics].includes(kind))) {
+      return { status: 'api-partial', ev, apiStatus };
+    }
+    if (['not-found', 'empty'].some((kind) => [apiStatus.event, apiStatus.statistics].includes(kind))) {
+      return { status: 'api-empty', ev, apiStatus };
+    }
+  }
+  if (!currentStats || currentStats.none || !currentStats.ALL) {
+    if (apiStatus?.statistics === 'failed' || apiStatus?.event === 'failed') return { status: 'api-failed', ev, apiStatus };
+    if (apiStatus?.statistics === 'partial' || apiStatus?.statistics === 'invalid'
+      || apiStatus?.event === 'partial' || apiStatus?.event === 'mismatch') return { status: 'api-partial', ev, apiStatus };
+    return { status: 'nodata', ev, apiStatus };
+  }
+  if (!history.length) {
+    if (apiStatus?.statistics === 'failed' || apiStatus?.event === 'failed') return { status: 'api-failed', ev, apiStatus };
+    if (apiStatus?.statistics === 'partial' || apiStatus?.statistics === 'invalid'
+      || apiStatus?.event === 'partial' || apiStatus?.event === 'mismatch') return { status: 'api-partial', ev, apiStatus };
+    if (apiStatus?.statistics === 'complete') return { status: 'nodata', ev, apiStatus };
+    return { status: 'warming', ev, elapsedMs: 0, apiStatus };
+  }
 
   const latest = history[history.length - 1];
   const dataAgeMs = Math.max(0, now - latest.at);
@@ -81,19 +99,25 @@ function analysisSnapshot(id, now) {
   const totalCorners = sum(changes.corners);
   const totalXg = sum(changes.xg);
   const totalBigChances = sum(changes.bigChances);
-  const homeScore = ev.homeScore?.current;
-  const awayScore = ev.awayScore?.current;
-  const score = [Number.isFinite(homeScore) ? homeScore : null, Number.isFinite(awayScore) ? awayScore : null];
+  const score = LiveAnalysisState.scorePair(ev);
+  const clock = LiveAnalysisState.matchClock(ev, now);
   return {
-    status: 'ready', ev, latest, changes, elapsedMs, dataAgeMs, analysisNowMs: now,
-    minute: analysisMinute(ev), phase: analysisPhase(ev), score,
+    status: 'ready', ev, latest, changes, elapsedMs, dataAgeMs, analysisNowMs: now, apiStatus,
+    minute: clock.minute, phase: clock.phase, clock, score,
+    eventIdentity: LiveAnalysisState.matchIdentity(ev, id),
     names: [teamName(ev.homeTeam), teamName(ev.awayTeam)],
     totalShots, totalSot, totalCorners, totalXg, totalBigChances,
     cumulativeXg: validPair(latest.stats.xg),
     possession: validPair(latest.stats.possession),
     redCards: validPair(latest.stats.redCards),
+    sampleCount: history.filter((sample) => sample.at >= cutoff).length,
+    weightedXgRate: weightedRollingXgRate(history, now),
     liveOdds: state.liveOdds.get(id) || null,
   };
+}
+
+function weightedRollingXgRate(history, now, halfLifeMs = 90_000) {
+  return LiveAnalysisState.weightedPairRate(history, 'xg', now, ANALYSIS_WINDOW_MS, halfLifeMs);
 }
 const makeAnalysisCandidates = (data) => AnalysisEngine.makeAnalysisCandidates(data, ANALYSIS_LINES);
 
@@ -121,6 +145,7 @@ function recordAnalysisSnapshot(id, statsFresh) {
 
   const now = Date.now();
   const phase = analysisPhase(ev);
+  const clock = LiveAnalysisState.matchClock(ev, now);
   const stats = {};
   for (const key of ['shots', 'sot', 'corners', 'xg', 'bigChances', 'bigChancesMissed', 'redCards', 'possession']) {
     const pair = all[key];
@@ -132,32 +157,16 @@ function recordAnalysisSnapshot(id, statsFresh) {
 
   let history = analysisHistory.get(id) || [];
   const previous = history[history.length - 1];
-  if (previous && previous.phase !== phase) {
+  const current = {
+    at: now, phase, identity: LiveAnalysisState.matchIdentity(ev, id),
+    minute: clock.minute, score: LiveAnalysisState.scorePair(ev), stats,
+  };
+  if (LiveAnalysisState.resetReason(previous, current)) {
     history = [];
     analysisConfirmations.delete(id);
   }
   if (previous && previous.at >= now) return;
-
-  // Sağlayıcı bir sayacı geriye alırsa bu ölçümü kullanma; yeni bir pencere başlat.
-  if (previous) {
-    const reset = ['shots', 'sot', 'corners', 'xg', 'bigChances', 'bigChancesMissed', 'redCards'].some((key) => {
-      const current = validPair(stats[key]);
-      const old = validPair(previous.stats[key]);
-      return current && old && (current[0] < old[0] || current[1] < old[1]);
-    });
-    if (reset) {
-      history = [];
-      analysisConfirmations.delete(id);
-    }
-  }
-
-  history.push({
-    at: now, phase, minute: analysisMinute(ev),
-    score: [
-      Number.isFinite(ev.homeScore?.current) ? ev.homeScore.current : null,
-      Number.isFinite(ev.awayScore?.current) ? ev.awayScore.current : null,
-    ], stats,
-  });
+  history.push(current);
   while (history.length && history[0].at < now - ANALYSIS_HISTORY_MS) history.shift();
   if (history.length > 45) history.splice(0, history.length - 45);
   analysisHistory.set(id, history);
@@ -167,14 +176,17 @@ function recordAnalysisSnapshot(id, statsFresh) {
 }
 
 function shouldPollLiveOdds(id, ev = state.events.get(id), now = Date.now()) {
-  if (!isLive(ev) || ![6, 7].includes(ev.status?.code)) return false;
+  if (!isLive(ev) || ![6, 7, 41, 42].includes(ev.status?.code)) return false;
   if (now - (state.lastOddsPoll.get(id) || 0) < LIVE_ODDS_POLL_MS) return false;
   state.lastOddsPoll.set(id, now);
   return true;
 }
 
-function recordLiveOddsSnapshot(id, payload, now = Date.now()) {
-  const snapshot = OddsEngine.parseSnapshot(payload, { eventLive: true, observedAt: now });
+function recordLiveOddsSnapshot(id, payload, event, now = Date.now()) {
+  const snapshot = OddsEngine.parseSnapshot(payload, {
+    eventLive: true, observedAt: now,
+    eventIdentity: LiveAnalysisState.matchIdentity(event, id),
+  });
   if (!snapshot) return false;
   state.liveOdds.set(id, OddsEngine.withMovement(snapshot, state.liveOdds.get(id)));
   return true;
@@ -213,11 +225,22 @@ function analysisResult(id, now = Date.now()) {
   const confirmations = analysisConfirmations.get(id) || {};
   const signals = makeAnalysisCandidates(data)
     .filter((candidate) => confirmations[candidate.key] >= ANALYSIS_CONFIRMATIONS);
-  const projection = AnalysisEngine.remainingXgScenarios(data, data.phase === '1Y' ? 49 : 94);
+  const projection = data.clock?.known
+    ? AnalysisEngine.remainingXgScenarios(data, data.clock.endMinute) : null;
+  const quality = AnalysisEngine.dataQualityScore(data);
+  const regime = AnalysisEngine.eventRegime(data);
+  const oddsPollStatus = data.apiStatus?.odds;
+  const oddsSummary = ['failed', 'partial', 'invalid'].includes(oddsPollStatus)
+    ? { key: oddsPollStatus, label: oddsPollStatus === 'failed' ? 'Oran isteği başarısız' : 'Oran yanıtı eksik' }
+    : ['empty', 'not-found'].includes(oddsPollStatus)
+      ? { key: 'empty', label: 'Eşleşen canlı oran yok' }
+    : OddsEngine.summary(data.liveOdds, now);
   return {
     ...data,
-    signals,
-    oddsSummary: OddsEngine.summary(data.liveOdds, now),
+    signals: signals.sort((a, b) => b.rankingScore - a.rankingScore),
+    dataQualityScore: quality,
+    regime,
+    oddsSummary,
     projectionBand: AnalysisEngine.scenarioBand(projection),
     teamBands: [
       activityBand(data.changes, 0, data.elapsedMs),
@@ -246,6 +269,8 @@ function marketContext(data) {
 
 function analysisContextDetails(data) {
   const details = [];
+  if (data.regime) details.push(`Oyun rejimi ${data.regime.label}`);
+  if (data.clock?.inStoppage && !data.clock.stoppageKnown) details.push('Uzatma süresi sağlayıcıda belirsiz');
   if (validPair(data.possession)) {
     details.push(`Topa sahip olma ${data.possession[0]}%–${data.possession[1]}%`);
   }
@@ -269,7 +294,9 @@ function analysisOddsReference(data) {
     parts.push(`${label} ${values.map((value) => value.toFixed(2)).join(' / ')}`);
   };
   const line = Number(ANALYSIS_LINES.matchTotal).toFixed(1);
-  addPair(`Maç ${line} Ü/A`, markets.matchTotals?.[line], ['over', 'under']);
+  if (['1Y', '2Y'].includes(data.phase)) {
+    addPair(`Maç ${line} Ü/A`, markets.matchTotals?.[line], ['over', 'under']);
+  }
   if (data.phase === '1Y') {
     const halfLine = Number(ANALYSIS_LINES.firstHalfTotal).toFixed(1);
     addPair(`İY ${halfLine} Ü/A`, markets.firstHalfTotals?.[halfLine], ['over', 'under']);
@@ -298,12 +325,16 @@ function makeSignalRow(signal) {
     el('span', `signal-level ${signal.level}`, signal.levelLabel || (signal.level === 'high' ? 'Yüksek aktivite' : 'Orta aktivite')),
   );
   row.append(top, el('div', 'signal-market', signal.market), el('div', 'signal-reason', signal.reason));
+  const confidence = el('div', 'signal-confidence',
+    `Model/girdi güveni ${signal.confidenceScore}/100 · veri ${signal.dataQualityScore}/100 · sıralama ${Math.round(signal.rankingScore)}${signal.valueEligible ? ' · model-değer eşiği geçti' : ''}`);
+  confidence.title = 'Güven ve sıralama puanı sonuç olasılığı değildir; veri kalitesi ve model tutarlılığını özetler.';
+  row.append(confidence);
   if (signal.oddsEvidence) {
     const evidence = signal.oddsEvidence;
     const movement = Number.isFinite(evidence.movement) && Math.abs(evidence.movement) >= 0.005
       ? ` · piyasa ${evidence.movement > 0 ? '+' : ''}${(evidence.movement * 100).toFixed(1)} puan` : '';
     row.append(el('div', 'signal-odds-evidence',
-      `Oran teyidi ${Number(evidence.price).toFixed(2)} · marj arındırılmış yön %${(evidence.fairProbability * 100).toFixed(0)}${movement}`));
+      `${evidence.provider ? `${evidence.provider} · ` : ''}oran ${evidence.price.toFixed(2)} · ham ima %${(evidence.impliedProbability * 100).toFixed(1)} · adil piyasa %${(evidence.fairMarketProbability * 100).toFixed(1)} (adil oran ${evidence.marketFairOdds.toFixed(2)}) · model %${(evidence.modelProbability * 100).toFixed(1)} (adil oran ${evidence.modelFairOdds.toFixed(2)}) · fark ${evidence.edge >= 0 ? '+' : ''}${(evidence.edge * 100).toFixed(1)} puan · model EV ${evidence.expectedValue >= 0 ? '+' : ''}${(evidence.expectedValue * 100).toFixed(1)}%${movement}`));
   }
   return row;
 }
@@ -352,6 +383,9 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
     inactive: ['Canlı değil', 'Bu karşılaşma şu anda canlı durumda değil.'],
     loading: ['Veri bekleniyor', 'Maç verisi yükleniyor.'],
     nodata: ['İstatistik yok', 'Bu maç için analize uygun şut, isabetli şut veya korner verisi gelmedi.'],
+    'api-failed': ['API isteği başarısız', 'Canlı maç veya istatistik servisine ulaşılamadı; önceki veriden yeni sinyal üretilmedi.'],
+    'api-partial': ['Eksik API yanıtı', 'Maç kimliği, skor veya istatistik yanıtı eksik; kısmi veri analiz penceresine alınmadı.'],
+    'api-empty': ['API verisi boş', 'Maç veya istatistik uç noktası bu kontrolde veri döndürmedi; eski veriyle yeni sinyal üretilmedi.'],
     stale: ['Veri gecikiyor', `Son başarılı kontrol ${analysisDuration(result.dataAgeMs)} önceydi; yeni veri gelene kadar sinyal gizlendi.`],
     warming: ['Ölçüm hazırlanıyor', `Güvenilir pencere için en az 3 dk veri gerekiyor. Şu an ${analysisDuration(result.elapsedMs)} ölçüldü.`],
   };
@@ -372,6 +406,11 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
   );
   if (result.oddsSummary) {
     topMeta.append(el('span', `analysis-odds-status ${result.oddsSummary.key}`, result.oddsSummary.label));
+  }
+  topMeta.append(el('span', 'analysis-quality', `Veri kalitesi ${result.dataQualityScore}/100`));
+  if (result.regime) topMeta.append(el('span', `analysis-regime ${result.regime.key}`, result.regime.label));
+  if (result.clock?.inStoppage && !result.clock.stoppageKnown) {
+    topMeta.append(el('span', 'analysis-clock-warning', 'Uzatma süresi belirsiz'));
   }
   if (result.projectionBand) {
     topMeta.append(el('span', `analysis-projection-range ${result.projectionBand.key}`, `Tempo aralığı ${result.projectionBand.label.toLowerCase()}`));

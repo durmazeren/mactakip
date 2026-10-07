@@ -7,6 +7,7 @@ const path = require('node:path');
 const OddsEngine = require('../src/js/odds-engine.js');
 const {
   ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes,
+  eventRegime, dataQualityScore, dynamicThreshold,
 } = require('../src/js/analysis-engine.js');
 
 function fixture(overrides = {}) {
@@ -15,6 +16,9 @@ function fixture(overrides = {}) {
     phase: '2Y',
     minute: 55,
     elapsedMs: 300_000,
+    dataAgeMs: 500,
+    sampleCount: 12,
+    clock: { known: true, endMinute: 94, matchEndMinute: 94 },
     score: [0, 2],
     names: ['Ev', 'Deplasman'],
     changes: {
@@ -46,6 +50,7 @@ test('next-goal and remaining-match direction follow recent pressure, not curren
 test('half-time totals and half-time BTTS are limited to first-half live play', () => {
   const firstHalf = fixture({
     phase: '1Y', minute: 18, score: [0, 0],
+    clock: { known: true, endMinute: 45, matchEndMinute: 94 },
     changes: { shots: [5, 3], sot: [2, 1], xg: [0.5, 0.5] },
     cumulativeXg: [1.5, 1.3], totalShots: 8, totalSot: 3, totalXg: 1.0,
   });
@@ -114,6 +119,32 @@ test('xG projection exposes ordered low/base/high scenarios and widens with temp
   assert.ok(['narrow', 'medium', 'wide'].includes(scenarioBand(volatileRange).key));
 });
 
+test('weighted recent xG changes the remaining-goal rate without replacing match baseline', () => {
+  const quietRecent = remainingXg(fixture({ weightedXgRate: [0.01, 0.01] }), 94);
+  const risingRecent = remainingXg(fixture({ weightedXgRate: [0.09, 0.01] }), 94);
+  assert.ok(risingRecent[0] > quietRecent[0]);
+  assert.ok(risingRecent[1] >= quietRecent[1]);
+});
+
+test('regime detection and data-quality score adapt thresholds to volatile or weak feeds', () => {
+  const stable = fixture({ changes: { xg: [0.15, 0.10] }, weightedXgRate: [0.03, 0.02] });
+  const surge = fixture({ changes: { xg: [1.1, 0.3] }, totalBigChances: 2 });
+  const quiet = fixture({
+    changes: { shots: [0, 0], sot: [0, 0], corners: [0, 0], xg: [0, 0], bigChances: [0, 0] },
+    cumulativeXg: [1.5, 1.5], totalShots: 0, totalSot: 0, totalBigChances: 0,
+  });
+  assert.equal(eventRegime(stable).key, 'balanced');
+  assert.equal(eventRegime(surge).key, 'surge');
+  assert.equal(eventRegime(quiet).key, 'cooldown');
+
+  const quality = dataQualityScore(stable);
+  const staleQuality = dataQualityScore({ ...stable, dataAgeMs: 35_000 });
+  const noClockQuality = dataQualityScore({ ...stable, clock: { known: false } });
+  assert.ok(quality > staleQuality);
+  assert.ok(quality > noClockQuality);
+  assert.ok(dynamicThreshold(surge, 0.62) > dynamicThreshold(stable, 0.62));
+});
+
 test('a total line that clears only the central tempo scenario is suppressed', () => {
   const borderline = fixture({ score: [0, 0] });
   const found = keys(borderline, { matchTotal: 1.5, firstHalfTotal: 1.5 });
@@ -126,7 +157,7 @@ test('market directions and activity observations are grouped separately', () =>
   assert.ok(candidates.some((candidate) => candidate.key === 'total-goals' && candidate.group === 'activity'));
 });
 
-test('fresh matching live odds confirm model directions and opposing prices suppress them', () => {
+test('fresh live odds add fair-price, edge, and EV evidence without erasing model direction', () => {
   const now = Date.now();
   const makeOdds = (over, under) => OddsEngine.parseSnapshot({
     markets: [{
@@ -138,10 +169,17 @@ test('fresh matching live odds confirm model directions and opposing prices supp
   const confirmed = makeAnalysisCandidates(fixture({ liveOdds: makeOdds(1.4, 3.2), analysisNowMs: now }))
     .find((candidate) => candidate.key === 'match-over-2_5');
   assert.ok(confirmed?.oddsEvidence?.verified);
+  assert.ok(Number.isFinite(confirmed.oddsEvidence.modelFairOdds));
+  assert.ok(Number.isFinite(confirmed.oddsEvidence.impliedProbability));
+  assert.ok(Number.isFinite(confirmed.oddsEvidence.edge));
+  assert.ok(Number.isFinite(confirmed.oddsEvidence.expectedValue));
 
   const opposed = makeAnalysisCandidates(fixture({ liveOdds: makeOdds(3.7, 1.25), analysisNowMs: now }))
-    .map((candidate) => candidate.key);
-  assert.ok(!opposed.includes('match-over-2_5'));
+    .find((candidate) => candidate.key === 'match-over-2_5');
+  assert.ok(opposed, 'the model direction remains visible alongside opposing market evidence');
+  assert.ok(opposed.oddsEvidence.edge > 0, 'the model-market disagreement is exposed as a positive edge');
+  assert.ok(opposed.oddsEvidence.expectedValue > 0);
+  assert.equal(opposed.valueEligible, true);
 });
 
 test('recent big chances add pressure and red cards adjust remaining xG by team', () => {
@@ -222,4 +260,16 @@ test('renderer loads the pure engine before analysis and exposes both line selec
   const renderer = readFileSync(path.join(__dirname, '../src/js/analysis.js'), 'utf8');
   assert.match(renderer, /Bahis market yönleri/);
   assert.match(renderer, /Maç içi aktivite/);
+  const css = readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
+  assert.match(css, /\.analysis-quality/);
+  assert.match(css, /\.analysis-regime/);
+  assert.match(css, /\.signal-confidence/);
+
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  const selectorSources = ['app.js', 'js/analysis.js'].map((file) =>
+    readFileSync(path.join(__dirname, '../src', file), 'utf8'));
+  const selectors = selectorSources.flatMap((source) =>
+    [...source.matchAll(/\$\('#([\w-]+)'/g)].map((match) => match[1]));
+  assert.ok(selectors.length > 0);
+  assert.ok(selectors.every((id) => ids.includes(id)), 'renderer selectors must resolve to static UI IDs');
 });
