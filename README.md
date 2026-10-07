@@ -1,6 +1,6 @@
 # Maç Takip
 
-Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde gösterir. Sağdaki "Şut ekranı" sadece seçili maçların toplam ve isabetli şutlarını yazar (her 10 sn'de güncellenir). Mac ve Windows'ta aynı şekilde çalışır.
+Seçilen maçların Sofascore canlı animasyonunu ızgarada gösterir; şut takip paneli ve kayan istatistik penceresi kullanan canlı aktivite analizi sunar. Mac ve Windows'ta çalışır.
 
 ## İndir (önerilen)
 
@@ -29,7 +29,7 @@ Tek gereksinim **Node.js** (LTS sürümü). Windows'ta yoksa `Baslat-Windows.bat
 - **Windows:** SmartScreen "Windows bilgisayarınızı korudu" derse: "Ek bilgi" → "Yine de çalıştır".
 - **Mac:** İnternetten indirilen `.command` ilk açılışta engellenirse: sağ tık → Aç. Çalıştırılamıyor derse Terminal'de bir kez `chmod +x Baslat-Mac.command`.
 
-Komut satırından: `npm install` ve ardından `npm start`.
+Komut satırından: `npm install` ve ardından `npm start`. Analiz motoru birim testleri için `npm test`.
 
 ## Kurulum dosyası (Node.js'siz bilgisayarlar)
 
@@ -46,7 +46,7 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 
 **Maç ekleme**
 - Üstteki kutuya tıkla: canlı ve bugünkü maçlar listelenir. Takım adı yazarak filtrele, tıklayınca eklenir.
-- Satırdaki **Şut** düğmesi maçı sadece şut ekranına ekler (animasyon açmaz). Şut ekranındaki **+ Maç ekle** de aynı işi yapar.
+- Satırdaki **Şut** düğmesi maçı sadece takip paneline ekler (animasyon açmaz). Paneldeki **+ Maç** da aynı işi yapar.
 - Listede yoksa Sofascore maç linkini yapıştır (linkin sonunda `#id:12345678` olmalı).
 - Animasyonlu en fazla 12, toplam 30 maç. Seçilen maçlar, hedefler ve düzen kapatıp açınca hatırlanır.
 
@@ -74,12 +74,18 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - Üst hedef baremi geçince yeşile döner ("Tuttu"), sayaç artmaya devam eder. Alt hedef baremi aşınca kırmızıya döner. Periyot bitince tutmayanlar "Yattı" olur.
 - Şut ekranının üstünde kuponun özeti: kaç hedef tuttu, yattı, devam ediyor.
 
+**Canlı analiz**
+- Takip panelindeki **Canlı analiz** sekmesi seçili canlı maçları yaklaşık 10 saniyede bir gelen başarılı istatistik kontrolleriyle izler. En az 3 dakikalık ölçüm oluşur; en fazla son 5 dakika değerlendirilir. Devre değişiminde veya istatistik sayacı geriye düzeltildiğinde pencere yeniden başlar. Veri 35 saniyeden eskiyse sinyal gizlenir.
+- Analiz aileleri: **sıradaki golü atacak takım** (baskı yönü), **İY alt/üst**, **İY KG**, **maç KG**, seçilebilir çizgide **maç alt/üst**, **takım gol temposu**, **maçın kalanını kim kazanır** (ev/beraberlik/deplasman yönü), **toplam korner** ve **takım şutu/isabetli şut**. İY marketleri yalnızca ilk yarıda izlenir. Gol alt/üst yönü, seçilen baremde skor ve kalan xG temposuyla Poisson dağılımının çizgi üstü/altı kütlesini değerlendirir. Kalan maç sonucu için mevcut skor hariç tutularak iki takımın kalan gol sayısı bağımsız Poisson dağılımlarıyla karşılaştırılır. Sıradaki gol baskı ölçüsü, 3–5 dakikalık veri pencereleri arasında kıyaslanabilmesi için beş dakikaya normalize edilir.
+- Sinyaller açıklanabilir istatistik göstergeleridir; oran, bahis sağlayıcısı çizgisi, maç geçmişiyle kalibrasyon veya beklenen getiri hesabı yoktur. Poisson/xG yönleri de tarihsel maçlarla kalibre edilmemiştir; iç sinyal eşikleri gerçek bahis olasılığı olarak yorumlanmamalıdır. xG projeksiyonu maç sonunu 94', ilk yarıyı 49' kabul eden sabit 4 dakikalık uzatma varsayımı kullanır. xG bulunmayan maçta xG'ye bağlı alt/üst, KG ve kalan maç sonucu yönü üretilmez; şut verileriyle sıradaki gol baskı yönü yine izlenebilir. Maç sonu 1X2, handikap, kart ve oyuncu bahisleri motorun kapsamında değildir. Oyuncu şut hedefleri kupon takibi özelliğidir.
+- Sofascore verileri sağlayıcı tanımlarına göre değişebilir. Resmî sayfa, API uç noktalarının paylaşılmadığını ve verilerinin bahisleri doğrulamak için kullanılmaması gerektiğini belirtiyor; motor çıktısını kesin sonuç ya da bahis tavsiyesi olarak görme.
+
 **Güncelleme**
 - Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta "Güncelle" → "Yeniden başlat ve kur". Mac'te yeni sürümün indirme sayfası açılır.
 
 ## Yeni sürüm yayınlama
 
-`package.json` içindeki `version` alanını artırıp (ör. 1.1.0 → 1.2.0) `main`'e push et. GitHub Actions Windows ve Mac kurulum dosyalarını derleyip Releases'a yükler; kurulu uygulamalar açılışta yeni sürümü görür. Sürüm artırılmadan yapılan push'lar yeni sürüm oluşturmaz.
+`package.json` içindeki `version` alanını artırıp (ör. 1.3.1 → 1.3.2) `main`'e push et. GitHub Actions Windows ve Mac kurulum dosyalarını derleyip Releases'a yükler; kurulu uygulamalar açılışta yeni sürümü görür. Sürüm artırılmadan yapılan push'lar yeni sürüm oluşturmaz.
 
 ## Teknik not
 

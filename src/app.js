@@ -24,7 +24,7 @@ async function addMatch(id, ev, anim) {
   saveMatches();
   if (anim) createTile(id);
   refresh(true);
-  pollOne(id).then(() => renderShotList());
+  pollOne(id).then(() => { renderShotList(); renderAnalysisList(); });
 }
 
 function setAnim(id, anim) {
@@ -46,6 +46,7 @@ function removeMatch(id) {
   state.events.delete(id);
   state.stats.delete(id);
   state.lastPoll.delete(id);
+  forgetAnalysis(id);
   delete state.layout.free[id];
   state.layout.z = state.layout.z.filter((x) => x !== id);
   if (state.layout.focus === id) state.layout.focus = null;
@@ -62,6 +63,7 @@ async function resetMatch(id) {
   state.stats.delete(id);
   state.lastPoll.delete(id);
   players.delete(id);
+  forgetAnalysis(id);
   forgetAlerts(id); // yeni veriyle sahte şut uyarısı çıkmasın
   for (const k of [...state.lastShown.keys()]) if (k.startsWith(`${id}|`)) state.lastShown.delete(k);
   const tile = state.tiles.get(id);
@@ -71,6 +73,7 @@ async function resetMatch(id) {
   }
   const ok = await pollOne(id);
   renderShotList();
+  renderAnalysisList();
   buttons.forEach((b) => b.classList.remove('spinning'));
   const ev = state.events.get(id);
   setStatus(ok ? `${teamName(ev?.homeTeam)} – ${teamName(ev?.awayTeam)} yenilendi` : 'Yenilenemedi, bağlantıyı kontrol et');
@@ -85,6 +88,7 @@ function refresh(animate) {
     : 'Üstteki kutuya tıklayıp canlı ya da bugünkü maçlardan seç, veya bir Sofascore maç linki yapıştır.';
   applyLayout(animate);
   renderShotList();
+  renderAnalysisList();
 }
 
 /* ---------- Canlı güncelleme ---------- */
@@ -113,6 +117,7 @@ async function pollOne(id) {
   else if (stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
     state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
   }
+  recordAnalysisSnapshot(id, stRes !== undefined);
   if (evRes !== undefined) state.lastPoll.set(id, Date.now());
   updateTile(id);
   checkAlerts(id);
@@ -128,6 +133,7 @@ async function pollAll() {
   try {
     const ok = await mapLimit(ids, 4, pollOne);
     renderShotList();
+    renderAnalysisList();
     const failed = ok.filter((x) => !x).length;
     setStatus(failed ? `Bağlantı sorunu (${failed} maç güncellenemedi)`
       : `Güncellendi ${new Date().toLocaleTimeString('tr-TR')}`);
@@ -224,6 +230,7 @@ function init() {
   initUpdates();
   initCardSettings();
   initFullscreen();
+  initAnalysisLines();
   $('#toggleSide').addEventListener('click', () => document.body.classList.toggle('side-hidden'));
   $('#periodSeg').addEventListener('click', (e) => {
     const p = e.target?.dataset?.period;
@@ -232,6 +239,9 @@ function init() {
     for (const b of $('#periodSeg').children) b.classList.toggle('on', b.dataset.period === p);
     renderShotList();
   });
+  $('#shotsTab').addEventListener('click', () => setSideView('shots'));
+  $('#analysisTab').addEventListener('click', () => setSideView('analysis'));
+  setSideView(load('sideView', 'shots'));
 
   // Kayıtlı maçları geri yükle
   const saved = state.matches;

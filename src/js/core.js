@@ -127,14 +127,19 @@ function scoreText(ev) {
 // İstatistikler: toplam şut, isabetli şut, korner (periyot bazında)
 function parseStats(json) {
   const out = {};
+  const numberValue = (value) => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value !== 'string') return null;
+    const parsed = Number.parseFloat(value.replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
   for (const block of json?.statistics || []) {
-    const items = block.groups.flatMap((g) => g.statisticsItems);
+    const items = (block.groups || []).flatMap((g) => g.statisticsItems || []);
     const pick = (key) => {
       const it = items.find((i) => i.key === key);
       if (!it) return null;
-      const h = it.homeValue ?? parseInt(it.home, 10);
-      const a = it.awayValue ?? parseInt(it.away, 10);
-      return [Number.isFinite(h) ? h : 0, Number.isFinite(a) ? a : 0];
+      return [numberValue(it.homeValue ?? it.home), numberValue(it.awayValue ?? it.away)];
     };
     // Sofascore değeri 0 olan satırları göndermiyor (ör. isabetli şut 0-0 ise satır yok).
     // Toplam şut = isabetli + isabetsiz + bloklanan; eksik olanı diğerlerinden tamamla.
@@ -142,10 +147,25 @@ function parseStats(json) {
     let sot = pick('shotsOnGoal');
     const off = pick('shotsOffGoal');
     const blocked = pick('blockedScoringAttempt');
-    const z = (v, i) => (v ? v[i] : 0);
-    if (!shots && (sot || off || blocked)) shots = [0, 1].map((i) => z(sot, i) + z(off, i) + z(blocked, i));
-    if (!sot && shots && (off || blocked)) sot = [0, 1].map((i) => Math.max(0, shots[i] - z(off, i) - z(blocked, i)));
-    out[block.period] = { shots, sot, corners: pick('cornerKicks') };
+    const component = (pair, side) => pair ? pair[side] : 0;
+    const sumComponents = (pairs, side) => {
+      const values = pairs.map((pair) => component(pair, side));
+      return values.every(Number.isFinite) ? values.reduce((sum, value) => sum + value, 0) : null;
+    };
+    if (!shots && (sot || off || blocked)) {
+      shots = [0, 1].map((side) => sumComponents([sot, off, blocked], side));
+    }
+    if (!sot && shots && (off || blocked)) {
+      sot = [0, 1].map((side) => {
+        const total = shots[side];
+        const other = sumComponents([off, blocked], side);
+        return Number.isFinite(total) && Number.isFinite(other) ? Math.max(0, total - other) : null;
+      });
+    }
+    out[block.period] = {
+      shots, sot, corners: pick('cornerKicks'),
+      xg: pick('expectedGoals'),
+    };
   }
   return out;
 }
