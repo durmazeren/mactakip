@@ -106,17 +106,32 @@ function needsPoll(id) {
 }
 
 async function pollOne(id) {
-  const [evRes, stRes] = await Promise.all([
+  const previousPhaseCode = state.events.get(id)?.status?.code;
+  const oddsDue = shouldPollLiveOdds(id);
+  const [evRes, stRes, oddsRes] = await Promise.all([
     api(`event/${id}`).catch(() => undefined),
     api(`event/${id}/statistics`).catch(() => undefined),
+    oddsDue ? api(`event/${id}/odds/1/all`).catch(() => undefined) : undefined,
     needsPlayers(id) ? loadPlayers(id) : null,
   ]);
   if (!findMatch(id)) return true;
   if (evRes?.event) state.events.set(id, evRes.event);
+  const currentEvent = state.events.get(id);
+  const phaseChanged = previousPhaseCode != null && currentEvent?.status?.code !== previousPhaseCode;
+  if (phaseChanged) {
+    state.liveOdds.delete(id);
+    state.lastOddsPoll.delete(id);
+  }
   if (stRes) state.stats.set(id, parseStats(stRes));
-  else if (stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
+  else if (stRes === null && currentEvent?.status?.type !== 'notstarted') {
     state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
   }
+  const liveOddsPhase = isLive(currentEvent) && [6, 7].includes(currentEvent.status?.code);
+  if (oddsDue && !phaseChanged && oddsRes && liveOddsPhase) {
+    recordLiveOddsSnapshot(id, oddsRes);
+    state.lastOddsPoll.set(id, Date.now());
+  }
+  if (!liveOddsPhase) state.liveOdds.delete(id);
   recordAnalysisSnapshot(id, stRes !== undefined);
   if (evRes !== undefined) state.lastPoll.set(id, Date.now());
   updateTile(id);

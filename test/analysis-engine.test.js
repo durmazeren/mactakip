@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
+const OddsEngine = require('../src/js/odds-engine.js');
 const {
   ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes,
 } = require('../src/js/analysis-engine.js');
@@ -125,6 +126,38 @@ test('market directions and activity observations are grouped separately', () =>
   assert.ok(candidates.some((candidate) => candidate.key === 'total-goals' && candidate.group === 'activity'));
 });
 
+test('fresh matching live odds confirm model directions and opposing prices suppress them', () => {
+  const now = Date.now();
+  const makeOdds = (over, under) => OddsEngine.parseSnapshot({
+    markets: [{
+      marketName: 'Total Goals Over/Under 2.5', updatedAt: now,
+      choices: [{ name: 'Over 2.5', decimalValue: over }, { name: 'Under 2.5', decimalValue: under }],
+    }],
+  }, { eventLive: true, observedAt: now });
+
+  const confirmed = makeAnalysisCandidates(fixture({ liveOdds: makeOdds(1.4, 3.2), analysisNowMs: now }))
+    .find((candidate) => candidate.key === 'match-over-2_5');
+  assert.ok(confirmed?.oddsEvidence?.verified);
+
+  const opposed = makeAnalysisCandidates(fixture({ liveOdds: makeOdds(3.7, 1.25), analysisNowMs: now }))
+    .map((candidate) => candidate.key);
+  assert.ok(!opposed.includes('match-over-2_5'));
+});
+
+test('recent big chances add pressure and red cards adjust remaining xG by team', () => {
+  const chancePressure = fixture({
+    changes: { shots: [0, 0], sot: [0, 0], xg: [0, 0], corners: [0, 0], bigChances: [3, 0] },
+    totalShots: 0, totalSot: 0, totalXg: 0, totalBigChances: 3,
+  });
+  assert.ok(keys(chancePressure).includes('next-goal-home'));
+
+  const level = remainingXg(fixture(), 94);
+  const redCard = remainingXg(fixture({ redCards: [1, 0] }), 94);
+  assert.ok(redCard[0] < level[0]);
+  assert.ok(redCard[1] > level[1]);
+  assert.deepEqual(remainingXg(fixture({ redCards: [-2, 0] }), 94), level);
+});
+
 test('next-goal pressure is normalized to a five-minute window', () => {
   const fiveMinutes = fixture({
     elapsedMs: 300_000,
@@ -181,6 +214,7 @@ test('every generated market key has a confirmation slot', () => {
 
 test('renderer loads the pure engine before analysis and exposes both line selectors', () => {
   const html = readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
+  assert.ok(html.indexOf('js/odds-engine.js') < html.indexOf('js/analysis-engine.js'));
   assert.ok(html.indexOf('js/analysis-engine.js') < html.indexOf('js/analysis.js'));
   assert.match(html, /id="analysisMatchLine"/);
   assert.match(html, /id="analysisHalfLine"/);

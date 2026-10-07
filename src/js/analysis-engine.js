@@ -3,10 +3,11 @@
 /* Pure, explainable market signal rules. These are live-stat indicators,
  * not bookmaker probabilities or calibrated betting recommendations. */
 (function attachAnalysisEngine(root, factory) {
-  const engine = factory();
+  const oddsEngine = typeof module === 'object' && module.exports ? require('./odds-engine.js') : root.OddsEngine;
+  const engine = factory(oddsEngine);
   root.AnalysisEngine = engine;
   if (typeof module === 'object' && module.exports) module.exports = engine;
-}(globalThis, () => {
+}(globalThis, (oddsEngine) => {
   const FIRST_HALF_END_MINUTE = 49; // regulation half plus a fixed 4-minute stoppage allowance
   const REGULATION_END_MINUTE = 94; // regulation match plus a fixed 4-minute stoppage allowance
   const OVER_DIRECTION_THRESHOLD = 0.62;
@@ -42,12 +43,14 @@
     const sot = data.changes.sot?.[side];
     const xg = data.changes.xg?.[side];
     const corners = data.changes.corners?.[side];
-    if (![shots, sot, xg, corners].some(Number.isFinite)) return null;
+    const bigChances = data.changes.bigChances?.[side];
+    if (![shots, sot, xg, corners, bigChances].some(Number.isFinite)) return null;
     const scale = fiveMinuteScale(data);
     return ((Number.isFinite(shots) ? shots * 0.4 : 0)
       + (Number.isFinite(sot) ? sot * 1.7 : 0)
       + (Number.isFinite(xg) ? xg * 5 : 0)
-      + (Number.isFinite(corners) ? corners * 0.25 : 0)) * scale;
+      + (Number.isFinite(corners) ? corners * 0.25 : 0)
+      + (Number.isFinite(bigChances) ? Math.min(3, bigChances) : 0)) * scale;
   }
 
   function dominantSide(data, { minimum = 2.5, margin = 1.35 } = {}) {
@@ -67,13 +70,22 @@
     const played = Math.max(10, data.minute);
     const windowMinutes = Math.max(3, data.elapsedMs / 60_000);
     const left = Math.max(0, endMinute - data.minute);
+    const redCards = validPair(data.redCards);
     return current.map((xg, side) => {
       const matchRate = Math.max(0, xg / played);
-      if (!recent) return matchRate * left;
-      const recentRate = Math.max(0, recent[side] / windowMinutes);
-      // Cap a short xG burst before blending it with the match-long pace.
-      const cappedRecent = Math.min(recentRate, Math.max(0.04, matchRate * 2.5));
-      return (matchRate * 0.75 + cappedRecent * 0.25) * left;
+      let remaining = matchRate * left;
+      if (recent) {
+        const recentRate = Math.max(0, recent[side] / windowMinutes);
+        // Cap a short xG burst before blending it with the match-long pace.
+        const cappedRecent = Math.min(recentRate, Math.max(0.04, matchRate * 2.5));
+        remaining = (matchRate * 0.75 + cappedRecent * 0.25) * left;
+      }
+      if (redCards) {
+        const ownRedCards = Math.max(0, Math.min(2, redCards[side]));
+        const opponentRedCards = Math.max(0, Math.min(2, redCards[1 - side]));
+        remaining *= Math.max(0.70, 1 - ownRedCards * 0.10) * (1 + opponentRedCards * 0.08);
+      }
+      return remaining;
     });
   }
 
@@ -328,23 +340,28 @@
 
   function makeAnalysisCandidates(data, lines = { matchTotal: 2.5, firstHalfTotal: 1.5 }) {
     if (data.status !== 'ready') return [];
-    const { changes, minute, names, totalShots, totalSot, totalCorners, totalXg } = data;
+    const {
+      changes, minute, names, totalShots, totalSot, totalCorners, totalXg, totalBigChances,
+    } = data;
     const candidates = [];
     const xgAvailable = !!changes.xg;
-    const enoughGoalActivity = changes.shots && changes.sot && minute >= 8 && minute <= 86 && (
-      (xgAvailable && totalShots >= 3 && totalSot >= 1 && totalXg >= 0.25)
-      || (totalShots >= 5 && totalSot >= 2)
+    const bigChanceActivity = Number.isFinite(totalBigChances) && totalBigChances > 0;
+    const enoughGoalActivity = minute >= 8 && minute <= 86 && (
+      (changes.shots && changes.sot && ((xgAvailable && totalShots >= 3 && totalSot >= 1 && totalXg >= 0.25)
+        || (totalShots >= 5 && totalSot >= 2))) || bigChanceActivity
     );
 
     if (enoughGoalActivity) {
       const high = data.elapsedMs >= 4 * 60_000 && (
-        (totalShots >= 7 && totalSot >= 3) || (xgAvailable && totalShots >= 4 && totalXg >= 0.6)
+        (Number.isFinite(totalShots) && totalShots >= 7 && totalSot >= 3)
+        || (xgAvailable && totalShots >= 4 && totalXg >= 0.6)
+        || totalBigChances >= 2
       );
       candidates.push({
         key: 'total-goals', icon: '⚽', title: 'Toplam gol aktivitesi',
         market: 'Toplam gol piyasası · izleme sinyali', level: high ? 'high' : 'medium',
         side: null,
-        reason: `Bu pencerede ${totalShots} şut ve ${totalSot} isabetli şut${xgAvailable ? `; xG artışı ${totalXg.toFixed(2)}` : ''}.`,
+        reason: `${Number.isFinite(totalShots) ? `Bu pencerede ${totalShots} şut ve ${Number.isFinite(totalSot) ? totalSot : 0} isabetli şut` : 'Bu pencerede büyük şans oluştu'}${xgAvailable ? `; xG artışı ${totalXg.toFixed(2)}` : ''}${bigChanceActivity ? `; ${totalBigChances} büyük şans` : ''}.`,
       });
     }
 
@@ -365,18 +382,20 @@
       const shots = changes.shots?.[side];
       const sot = changes.sot?.[side];
       const xg = changes.xg?.[side];
-      const teamGoalActivity = Number.isFinite(shots) && Number.isFinite(sot) && (
+      const bigChances = changes.bigChances?.[side];
+      const teamGoalActivity = (Number.isFinite(shots) && Number.isFinite(sot) && (
         (shots >= 3 && sot >= 1) || (Number.isFinite(xg) && shots >= 2 && xg >= 0.2)
-      );
+      )) || (Number.isFinite(bigChances) && bigChances >= 1);
       if (teamGoalActivity && minute >= 8 && minute <= 86) {
         const high = data.elapsedMs >= 4 * 60_000 && (
-          (shots >= 5 && sot >= 2) || (Number.isFinite(xg) && xg >= 0.45)
+          (Number.isFinite(shots) && shots >= 5 && sot >= 2)
+          || (Number.isFinite(xg) && xg >= 0.45) || bigChances >= 2
         );
         candidates.push({
           key: side === 0 ? 'team-goal-home' : 'team-goal-away', icon: '🥅',
           title: `${names[side]} hücum aktivitesi`,
           market: 'Takım golü · izleme sinyali', level: high ? 'high' : 'medium', side,
-          reason: `${names[side]} bu pencerede ${shots} şut ve ${sot} isabetli şut${Number.isFinite(xg) ? `; xG artışı ${xg.toFixed(2)}` : ''}.`,
+          reason: `${names[side]} bu pencerede ${Number.isFinite(shots) ? `${shots} şut ve ${Number.isFinite(sot) ? sot : 0} isabetli şut` : 'büyük şans'}${Number.isFinite(xg) ? `; xG artışı ${xg.toFixed(2)}` : ''}${Number.isFinite(bigChances) && bigChances > 0 ? `; ${bigChances} büyük şans` : ''}.`,
         });
       }
 
@@ -396,11 +415,16 @@
       firstHalfTotal: [0.5, 1.5, 2.5].includes(Number(lines.firstHalfTotal)) ? Number(lines.firstHalfTotal) : 1.5,
     };
     candidates.push(...makeMarketCandidates(data, safeLines));
+    const oddsConfirmed = [];
     for (const candidate of candidates) {
       candidate.group = /^(next-goal-|rest-result-|btts-|half-btts-|match-|half-)/.test(candidate.key)
         ? 'market' : 'activity';
+      const evidence = oddsEngine?.confirmation(data.liveOdds, candidate.key, data.analysisNowMs);
+      if (evidence?.verified && !evidence.supported) continue;
+      if (evidence?.verified) candidate.oddsEvidence = evidence;
+      oddsConfirmed.push(candidate);
     }
-    return candidates;
+    return oddsConfirmed;
   }
 
   return { ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes };

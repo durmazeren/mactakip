@@ -408,6 +408,10 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .analysis-projection-range { padding: 3px 6px; border: 1px solid var(--line-soft); border-radius: 5px; color: var(--text-2); background: rgba(255, 255, 255, .035); font-size: 8px; font-weight: 700; }
 .analysis-projection-range.medium { color: var(--alert); border-color: rgba(219, 170, 63, .2); }
 .analysis-projection-range.wide { color: var(--muted); border-style: dashed; }
+.analysis-odds-status { max-width: 100%; padding: 3px 6px; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 5px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: 8px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-odds-status.verified { color: var(--success); border-color: rgba(57, 181, 122, .24); background: rgba(57, 181, 122, .07); }
+.analysis-odds-status.unverified { color: var(--alert); border-color: rgba(219, 170, 63, .2); }
+.analysis-odds-reference { margin: -2px 0 7px; padding: 5px 7px; border-radius: 6px; color: var(--text-2); background: rgba(122, 132, 255, .055); font-size: 8px; line-height: 1.45; font-variant-numeric: tabular-nums; }
 .analysis-team-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .analysis-team { min-width: 0; }
 .analysis-team-label { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 4px; color: var(--text-2); font-size: 10px; }
@@ -426,6 +430,7 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .analysis-metric span { color: var(--muted); font-size: 9px; }
 .analysis-metric b { overflow: hidden; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .analysis-context { margin-top: 6px; color: var(--muted); font-size: 9px; }
+.analysis-context-details { margin-top: 3px; color: var(--text-2); font-size: 9px; line-height: 1.4; }
 .analysis-signal-section { margin-top: 8px; }
 .analysis-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 1px; color: var(--text-2); font-size: 9px; }
 .analysis-section-head b { font-size: 9px; font-weight: 800; letter-spacing: .025em; }
@@ -443,6 +448,7 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .signal-level.high { color: var(--success); background: rgba(57, 181, 122, .15); }
 .signal-market { margin: 4px 0 0 19px; color: var(--text-2); font-size: 9px; font-weight: 700; }
 .signal-reason { margin: 3px 0 0 19px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.signal-odds-evidence { margin: 4px 0 0 19px; color: var(--success); font-size: 8px; font-weight: 700; line-height: 1.4; }
 .analysis-no-signal { margin-top: 7px; padding: 6px 7px; border-radius: 7px; color: var(--muted); background: rgba(0, 0, 0, .13); font-size: 9px; }
 .analysis-state { display: flex; flex-direction: column; gap: 4px; padding: 9px 2px 2px; }
 .analysis-state b { color: var(--text-2); font-size: 11px; }

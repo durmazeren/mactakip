@@ -9,6 +9,7 @@ const ANALYSIS_HISTORY_MS = ANALYSIS_WINDOW_MS + 20_000;
 const ANALYSIS_MIN_WINDOW_MS = 3 * 60_000;
 const ANALYSIS_STALE_MS = 35_000;
 const ANALYSIS_CONFIRMATIONS = 2;
+const LIVE_ODDS_POLL_MS = 30_000;
 const ANALYSIS_TYPES = AnalysisEngine.ANALYSIS_TYPES;
 const savedMatchLine = Number(load('analysisMatchTotal', 2.5));
 const savedHalfLine = Number(load('analysisFirstHalfTotal', 1.5));
@@ -64,13 +65,13 @@ function analysisSnapshot(id, now) {
   }
 
   const changes = {};
-  for (const key of ['shots', 'sot', 'corners', 'xg']) {
+  for (const key of ['shots', 'sot', 'corners', 'xg', 'bigChances', 'bigChancesMissed']) {
     changes[key] = pairDelta(latest.stats[key], baseline.stats[key]);
   }
   const hasShots = !!changes.shots;
   const hasSot = !!changes.sot;
   const hasCorners = !!changes.corners;
-  if (!hasShots && !hasSot && !hasCorners) {
+  if (!hasShots && !hasSot && !hasCorners && !changes.bigChances) {
     return { status: 'nodata', ev, latest, elapsedMs, dataAgeMs };
   }
 
@@ -79,15 +80,19 @@ function analysisSnapshot(id, now) {
   const totalSot = sum(changes.sot);
   const totalCorners = sum(changes.corners);
   const totalXg = sum(changes.xg);
+  const totalBigChances = sum(changes.bigChances);
   const homeScore = ev.homeScore?.current;
   const awayScore = ev.awayScore?.current;
   const score = [Number.isFinite(homeScore) ? homeScore : null, Number.isFinite(awayScore) ? awayScore : null];
   return {
-    status: 'ready', ev, latest, changes, elapsedMs, dataAgeMs,
+    status: 'ready', ev, latest, changes, elapsedMs, dataAgeMs, analysisNowMs: now,
     minute: analysisMinute(ev), phase: analysisPhase(ev), score,
     names: [teamName(ev.homeTeam), teamName(ev.awayTeam)],
-    totalShots, totalSot, totalCorners, totalXg,
+    totalShots, totalSot, totalCorners, totalXg, totalBigChances,
     cumulativeXg: validPair(latest.stats.xg),
+    possession: validPair(latest.stats.possession),
+    redCards: validPair(latest.stats.redCards),
+    liveOdds: state.liveOdds.get(id) || null,
   };
 }
 const makeAnalysisCandidates = (data) => AnalysisEngine.makeAnalysisCandidates(data, ANALYSIS_LINES);
@@ -117,11 +122,11 @@ function recordAnalysisSnapshot(id, statsFresh) {
   const now = Date.now();
   const phase = analysisPhase(ev);
   const stats = {};
-  for (const key of ['shots', 'sot', 'corners', 'xg']) {
+  for (const key of ['shots', 'sot', 'corners', 'xg', 'bigChances', 'bigChancesMissed', 'redCards', 'possession']) {
     const pair = all[key];
     stats[key] = Array.isArray(pair) ? [...pair] : null;
   }
-  const hasData = ['shots', 'sot', 'corners', 'xg']
+  const hasData = ['shots', 'sot', 'corners', 'xg', 'bigChances']
     .some((key) => validPair(stats[key]));
   if (!hasData) return;
 
@@ -135,7 +140,7 @@ function recordAnalysisSnapshot(id, statsFresh) {
 
   // Sağlayıcı bir sayacı geriye alırsa bu ölçümü kullanma; yeni bir pencere başlat.
   if (previous) {
-    const reset = ['shots', 'sot', 'corners', 'xg'].some((key) => {
+    const reset = ['shots', 'sot', 'corners', 'xg', 'bigChances', 'bigChancesMissed', 'redCards'].some((key) => {
       const current = validPair(stats[key]);
       const old = validPair(previous.stats[key]);
       return current && old && (current[0] < old[0] || current[1] < old[1]);
@@ -161,19 +166,36 @@ function recordAnalysisSnapshot(id, statsFresh) {
   advanceAnalysisConfirmations(id, candidates);
 }
 
+function shouldPollLiveOdds(id, ev = state.events.get(id), now = Date.now()) {
+  if (!isLive(ev) || ![6, 7].includes(ev.status?.code)) return false;
+  if (now - (state.lastOddsPoll.get(id) || 0) < LIVE_ODDS_POLL_MS) return false;
+  state.lastOddsPoll.set(id, now);
+  return true;
+}
+
+function recordLiveOddsSnapshot(id, payload, now = Date.now()) {
+  const snapshot = OddsEngine.parseSnapshot(payload, { eventLive: true, observedAt: now });
+  if (!snapshot) return false;
+  state.liveOdds.set(id, OddsEngine.withMovement(snapshot, state.liveOdds.get(id)));
+  return true;
+}
+
 function forgetAnalysis(id) {
   analysisHistory.delete(id);
   analysisConfirmations.delete(id);
+  state.liveOdds.delete(id);
+  state.lastOddsPoll.delete(id);
 }
 
 function activityBand(stats, side, elapsedMs) {
-  const covered = ['shots', 'sot', 'xg'].some((key) => Number.isFinite(stats?.[key]?.[side]));
+  const covered = ['shots', 'sot', 'xg', 'bigChances'].some((key) => Number.isFinite(stats?.[key]?.[side]));
   if (!covered) return { key: 'na', label: 'Veri yok', width: 0 };
   const shots = stats?.shots?.[side] || 0;
   const sot = stats?.sot?.[side] || 0;
   const xg = stats?.xg?.[side] || 0;
+  const bigChances = stats?.bigChances?.[side] || 0;
   const fiveMinuteScale = 300_000 / Math.max(ANALYSIS_MIN_WINDOW_MS, elapsedMs || 0);
-  const activity = (shots * 7 + sot * 10 + xg * 14) * fiveMinuteScale;
+  const activity = (shots * 7 + sot * 10 + xg * 14 + bigChances * 18) * fiveMinuteScale;
   if (activity >= 48) return { key: 'high', label: 'Yüksek', width: 100 };
   if (activity >= 22) return { key: 'medium', label: 'Orta', width: 63 };
   return { key: 'low', label: 'Düşük', width: 28 };
@@ -195,6 +217,7 @@ function analysisResult(id, now = Date.now()) {
   return {
     ...data,
     signals,
+    oddsSummary: OddsEngine.summary(data.liveOdds, now),
     projectionBand: AnalysisEngine.scenarioBand(projection),
     teamBands: [
       activityBand(data.changes, 0, data.elapsedMs),
@@ -221,6 +244,45 @@ function marketContext(data) {
   return `Skor ${scoreTextValue} · ${data.phase} · ${minuteText(data.ev)}`;
 }
 
+function analysisContextDetails(data) {
+  const details = [];
+  if (validPair(data.possession)) {
+    details.push(`Topa sahip olma ${data.possession[0]}%–${data.possession[1]}%`);
+  }
+  if (validPair(data.redCards) && data.redCards.some((count) => count > 0)) {
+    details.push(`Kırmızı kart ${data.redCards[0]}–${data.redCards[1]}`);
+  }
+  if (validPair(data.changes?.bigChances) && data.totalBigChances > 0) {
+    details.push(`Büyük şans ${data.changes.bigChances[0]}–${data.changes.bigChances[1]} · pencere`);
+  }
+  return details;
+}
+
+function analysisOddsReference(data) {
+  const markets = data.liveOdds?.markets;
+  if (!markets) return '';
+  const parts = [];
+  const addPair = (label, quote, names) => {
+    if (!quote) return;
+    const values = names.map((name) => quote.prices?.[name]);
+    if (values.some((value) => !Number.isFinite(value))) return;
+    parts.push(`${label} ${values.map((value) => value.toFixed(2)).join(' / ')}`);
+  };
+  const line = Number(ANALYSIS_LINES.matchTotal).toFixed(1);
+  addPair(`Maç ${line} Ü/A`, markets.matchTotals?.[line], ['over', 'under']);
+  if (data.phase === '1Y') {
+    const halfLine = Number(ANALYSIS_LINES.firstHalfTotal).toFixed(1);
+    addPair(`İY ${halfLine} Ü/A`, markets.firstHalfTotals?.[halfLine], ['over', 'under']);
+  }
+  addPair('KG E/H', markets.matchBtts, ['yes', 'no']);
+  if (markets.nextGoal) {
+    const next = ['home', 'none', 'away'].filter((side) => Number.isFinite(markets.nextGoal.prices?.[side]));
+    const labels = { home: 'Ev', none: 'Gol yok', away: 'Dep' };
+    if (next.length >= 2) parts.push(`Sıradaki gol ${next.map((side) => `${labels[side]} ${markets.nextGoal.prices[side].toFixed(2)}`).join(' / ')}`);
+  }
+  return parts.join(' · ');
+}
+
 function analysisScoreText(ev) {
   if (ev?.status?.type === 'notstarted') return '–';
   const score = [ev?.homeScore?.current, ev?.awayScore?.current];
@@ -236,6 +298,13 @@ function makeSignalRow(signal) {
     el('span', `signal-level ${signal.level}`, signal.levelLabel || (signal.level === 'high' ? 'Yüksek aktivite' : 'Orta aktivite')),
   );
   row.append(top, el('div', 'signal-market', signal.market), el('div', 'signal-reason', signal.reason));
+  if (signal.oddsEvidence) {
+    const evidence = signal.oddsEvidence;
+    const movement = Number.isFinite(evidence.movement) && Math.abs(evidence.movement) >= 0.005
+      ? ` · piyasa ${evidence.movement > 0 ? '+' : ''}${(evidence.movement * 100).toFixed(1)} puan` : '';
+    row.append(el('div', 'signal-odds-evidence',
+      `Oran teyidi ${Number(evidence.price).toFixed(2)} · marj arındırılmış yön %${(evidence.fairProbability * 100).toFixed(0)}${movement}`));
+  }
   return row;
 }
 
@@ -301,10 +370,15 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
     el('span', 'analysis-window', `${analysisDuration(result.elapsedMs)} ölçüm`),
     el('span', 'analysis-freshness', `Kontrol ${analysisDuration(result.dataAgeMs)} önce`),
   );
+  if (result.oddsSummary) {
+    topMeta.append(el('span', `analysis-odds-status ${result.oddsSummary.key}`, result.oddsSummary.label));
+  }
   if (result.projectionBand) {
     topMeta.append(el('span', `analysis-projection-range ${result.projectionBand.key}`, `Tempo aralığı ${result.projectionBand.label.toLowerCase()}`));
   }
   card.append(topMeta);
+  const oddsReference = analysisOddsReference(result);
+  if (oddsReference) card.append(el('div', 'analysis-odds-reference', oddsReference));
 
   const teamGrid = el('div', 'analysis-team-grid');
   for (const side of [0, 1]) {
@@ -332,6 +406,8 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
 
   const scoreContext = el('div', 'analysis-context', marketContext(result));
   card.append(scoreContext);
+  const contextDetails = analysisContextDetails(result);
+  if (contextDetails.length) card.append(el('div', 'analysis-context-details', contextDetails.join(' · ')));
   const marketSignals = result.signals.filter((signal) => signal.group === 'market');
   const activitySignals = result.signals.filter((signal) => signal.group !== 'market');
   if (!result.signals.length) {

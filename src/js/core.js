@@ -40,7 +40,9 @@ const state = {
   matches: loadMatches(),            // [{ id, anim }] — anim: false ise sadece şut ekranında
   events: new Map(),                 // id -> son event verisi
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
+  liveOdds: new Map(),               // id -> son canlı fiyatlar; API zaman damgası doğrulanmadan model teyidi sayılmaz
   lastPoll: new Map(),               // id -> son sorgu zamanı (ms)
+  lastOddsPoll: new Map(),           // id -> son canlı oran sorgusu zamanı (ms)
   tiles: new Map(),                  // id -> animasyon kutusu durumu
   period: 'ALL',
   addMode: 'anim',                   // arama kutusundan seçilen maç nereye eklensin
@@ -165,6 +167,10 @@ function parseStats(json) {
     out[block.period] = {
       shots, sot, corners: pick('cornerKicks'),
       xg: pick('expectedGoals'),
+      bigChances: pick('bigChanceCreated') || pick('bigChancesCreated'),
+      bigChancesMissed: pick('bigChanceMissed'),
+      possession: pick('ballPossession'),
+      redCards: pick('redCards'),
     };
   }
   return out;

@@ -93,7 +93,7 @@
               </select>
             </label>
           </div>
-          <p>Oran yoktur. Market yönleri düşük, temel ve yüksek xG tempo senaryolarında sınanır; bu aralıklar tarihsel sonuçlarla kalibre edilmemiştir. Ufuk 49′/94′ varsayılır.</p>
+          <p>Scraper canlı oran sağlarsa yalnızca güncel kaynak zaman damgalı ve eşleşen marketler sinyal teyidinde kullanılır. Oran bulunamazsa xG/istatistik modeli çalışmayı sürdürür. Olasılık ve tempo aralıkları tarihsel sonuçlarla kalibre edilmemiştir; ufuk 49′/94′ varsayılır.</p>
         </div>
         <div id="analysisSummary" class="analysis-summary" role="status" aria-live="polite"></div>
         <div id="analysisList" class="analysis-list"></div>
@@ -145,6 +145,7 @@
   <script src="js/coupon.js"></script>
   <script src="js/shots.js"></script>
   <script src="js/alerts.js"></script>
+  <script src="js/odds-engine.js"></script>
   <script src="js/analysis-engine.js"></script>
   <script src="js/analysis.js"></script>
   <script src="app.js"></script>
