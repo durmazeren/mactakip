@@ -77,6 +77,40 @@
     });
   }
 
+  function remainingXgScenarios(data, endMinute) {
+    const base = remainingXg(data, endMinute);
+    if (!base) return null;
+    const current = validPair(data.cumulativeXg);
+    const recent = validPair(data.changes.xg);
+    const played = Math.max(10, data.minute);
+    const windowMinutes = Math.max(3, data.elapsedMs / 60_000);
+    const low = [];
+    const high = [];
+
+    for (let side = 0; side < 2; side++) {
+      const matchRate = Math.max(0, current[side] / played);
+      const recentRate = recent ? Math.max(0, recent[side] / windowMinutes) : null;
+      // A wider fixed band represents weaker evidence; it is not a calibrated interval.
+      const disagreement = recentRate == null ? 0.30
+        : Math.abs(recentRate - matchRate) / Math.max(0.08, matchRate, recentRate);
+      const spread = Math.min(0.55, 0.18 + disagreement * 0.12);
+      low.push(Math.max(0, base[side] * (1 - spread)));
+      high.push(base[side] * (1 + spread));
+    }
+    return { low, base, high };
+  }
+
+  function scenarioBand(scenarios) {
+    if (!scenarios) return null;
+    const baseTotal = scenarios.base[0] + scenarios.base[1];
+    const width = (scenarios.high[0] + scenarios.high[1]
+      - scenarios.low[0] - scenarios.low[1]) / 2;
+    const ratio = width / Math.max(0.2, baseTotal);
+    if (ratio <= 0.22) return { key: 'narrow', label: 'Dar' };
+    if (ratio <= 0.42) return { key: 'medium', label: 'Orta' };
+    return { key: 'wide', label: 'Geniş' };
+  }
+
   function poissonOutcomes(lambda) {
     if (!validPair(lambda)) return null;
     const distribution = lambda.map(poissonDistribution);
@@ -119,17 +153,25 @@
     return poissonCdf(Math.floor(line) - currentGoals, lambda);
   }
 
-  function pushRemainderResult(candidates, data, lambda) {
+  function pushRemainderResult(candidates, data, scenarios) {
     if (data.minute < 18 || data.minute > 80) return;
-    const outcomes = poissonOutcomes(lambda);
-    if (!outcomes) return;
-    const sorted = Object.entries(outcomes).sort((a, b) => b[1] - a[1]);
-    const [winner, top] = sorted[0];
-    const runnerUp = sorted[1][1];
-    const lambdaSum = lambda[0] + lambda[1];
+    const combinations = [
+      [scenarios.low[0], scenarios.low[1]],
+      [scenarios.low[0], scenarios.high[1]],
+      [scenarios.high[0], scenarios.low[1]],
+      [scenarios.high[0], scenarios.high[1]],
+    ].map(poissonOutcomes);
+    if (combinations.some((outcomes) => !outcomes)) return;
+    const winners = combinations.map((outcomes) =>
+      Object.entries(outcomes).sort((a, b) => b[1] - a[1]));
+    const [winner] = winners[0][0];
+    if (!winners.every((sorted) => sorted[0][0] === winner)) return;
+    const top = Math.min(...winners.map((sorted) => sorted[0][1]));
+    const margin = Math.min(...winners.map((sorted) => sorted[0][1] - sorted[1][1]));
+    const lambdaSum = scenarios.base[0] + scenarios.base[1];
     if (winner === 'draw') {
       if (top < 0.60 || lambdaSum < 0.15) return;
-    } else if (top < 0.52 || top - runnerUp < 0.10 || lambdaSum < 0.3) {
+    } else if (top < 0.52 || margin < 0.10 || lambdaSum < 0.3) {
       return;
     }
 
@@ -141,7 +183,7 @@
       level: top >= 0.68 && data.elapsedMs >= 240_000 ? 'high' : 'medium',
       levelLabel: top >= 0.68 ? 'Model yönü güçlü' : 'Model yönü',
       side: winner === 'draw' ? null : winner === 'home' ? 0 : 1,
-      reason: `Son xG temposuyla kalan golleri bağımsız Poisson dağılımında karşılaştırır; mevcut skor hesaba katılmaz. Model yönü olasılık veya bahis oranı değildir.`,
+      reason: `Ev/deplasman xG tempo aralığının dört uç senaryosunda da yön değişmedi; mevcut skor hesaba katılmaz. Bu, kalibre edilmiş olasılık veya bahis oranı değildir.`,
     });
   }
 
@@ -149,8 +191,8 @@
     return String(value).replace('.', '_');
   }
 
-  function pushLineSignal(candidates, data, { half, line, forecast, currentGoals }) {
-    if (!Number.isFinite(forecast) || !Number.isFinite(currentGoals) || currentGoals > line) return;
+  function pushLineSignal(candidates, data, { half, line, forecast, forecastLow, forecastHigh, currentGoals }) {
+    if (![forecast, forecastLow, forecastHigh, currentGoals].every(Number.isFinite) || currentGoals > line) return;
     const label = half ? 'İY' : 'Maç';
     const keyPrefix = half ? 'half' : 'match';
     const shots = total(data.changes.shots);
@@ -158,9 +200,10 @@
     const xg = total(data.changes.xg);
     const windowGoalSupport = (Number.isFinite(sot) && sot >= 1)
       || (Number.isFinite(xg) && xg >= 0.15);
-    const lambda = Math.max(0, forecast - currentGoals);
-    const overChance = overProbability(lambda, currentGoals, line);
-    const underChance = underProbability(lambda, currentGoals, line);
+    const lowLambda = Math.max(0, forecastLow - currentGoals);
+    const highLambda = Math.max(0, forecastHigh - currentGoals);
+    const overChance = overProbability(lowLambda, currentGoals, line);
+    const underChance = underProbability(highLambda, currentGoals, line);
     const underStart = half ? 30 : 55;
     const quietWindow = (!Number.isFinite(sot) || sot === 0)
       && (!Number.isFinite(shots) || shots <= 3)
@@ -173,7 +216,7 @@
         title: `${label} ${line} üst yönü`,
         market: `${label} toplam gol · üst ${line}`,
         level, levelLabel: level === 'high' ? 'xG yönü güçlü' : 'xG yönü', side: null,
-        reason: `xG-temelli Poisson dağılımında seçilen çizginin üstü eşik aşımında; beklenen toplam ${forecast.toFixed(1)} gol, son pencerede ${Number.isFinite(sot) ? sot : '—'} isabetli şut ve ${Number.isFinite(xg) ? xg.toFixed(2) : '—'} xG artışı var.`,
+        reason: `Düşük tempo senaryosunda bile Poisson üst yön eşiği aşılıyor; temel tahmin ${forecast.toFixed(1)} gol, son pencerede ${Number.isFinite(sot) ? sot : '—'} isabetli şut ve ${Number.isFinite(xg) ? xg.toFixed(2) : '—'} xG artışı var.`,
       });
     } else if (data.minute >= underStart && underChance >= UNDER_DIRECTION_THRESHOLD && quietWindow) {
       candidates.push({
@@ -182,13 +225,13 @@
         market: `${label} toplam gol · alt ${line}`,
         level: underChance >= 0.85 && data.elapsedMs >= 240_000 ? 'high' : 'medium',
         levelLabel: underChance >= 0.85 ? 'xG yönü güçlü' : 'xG yönü', side: null,
-        reason: `xG-temelli Poisson dağılımında seçilen çizginin altı eşik aşımında; beklenen toplam ${forecast.toFixed(1)} gol ve son pencerede belirgin şut/xG artışı yok.`,
+        reason: `Yüksek tempo senaryosunda bile Poisson alt yön eşiği korunuyor; temel tahmin ${forecast.toFixed(1)} gol ve son pencerede belirgin şut/xG artışı yok.`,
       });
     }
   }
 
-  function pushBttsSignal(candidates, data, { half, score, lambda, minuteFloor }) {
-    if (!lambda || !validPair(score)) return;
+  function pushBttsSignal(candidates, data, { half, score, scenarios, minuteFloor }) {
+    if (!scenarios || !validPair(score)) return;
     const unscored = [0, 1].filter((side) => score[side] === 0);
     if (!unscored.length) return; // KG Evet zaten gerçekleşti.
     const label = half ? 'İY KG' : 'KG';
@@ -196,9 +239,9 @@
     const recentXg = validPair(data.changes.xg);
     const currentXg = validPair(data.cumulativeXg);
     const recentSot = validPair(data.changes.sot);
-    const yesChance = unscored.reduce((chance, side) => chance * (1 - Math.exp(-Math.min(12, lambda[side]))), 1);
+    const yesChance = unscored.reduce((chance, side) => chance * (1 - Math.exp(-Math.min(12, scenarios.low[side]))), 1);
     const allHaveScoringPressure = unscored.every((side) =>
-      lambda[side] >= (half ? 0.18 : 0.32)
+      scenarios.low[side] >= (half ? 0.18 : 0.32)
       && ((recentXg && recentXg[side] >= 0.08)
         || (currentXg && currentXg[side] >= 0.18)
         || (recentSot && recentSot[side] >= 1)));
@@ -207,18 +250,19 @@
         key: `${prefix}-yes`, icon: '⚽', title: `${label} Evet yönü`,
         market: half ? 'İlk yarı karşılıklı gol' : 'Karşılıklı gol',
         level: 'medium', levelLabel: 'xG yönü', side: null,
-        reason: `Henüz golü olmayan taraf(lar) için kalan xG tempo uzatımı ${unscored.map((side) => `${data.names[side]} ${lambda[side].toFixed(2)}`).join(' · ')}; şut/xG desteği mevcut.`,
+        reason: `Düşük tempo senaryosunda henüz golü olmayan taraf(lar)ın xG uzatımı ${unscored.map((side) => `${data.names[side]} ${scenarios.low[side].toFixed(2)}`).join(' · ')}; şut/xG desteği mevcut.`,
       });
       return;
     }
 
-    const noChanceSide = unscored.find((side) => lambda[side] <= (half ? 0.06 : 0.10));
-    if (data.minute >= minuteFloor && yesChance <= 1 - BTTS_NO_DIRECTION_THRESHOLD && noChanceSide != null) {
+    const highYesChance = unscored.reduce((chance, side) => chance * (1 - Math.exp(-Math.min(12, scenarios.high[side]))), 1);
+    const noChanceSide = unscored.find((side) => scenarios.high[side] <= (half ? 0.06 : 0.10));
+    if (data.minute >= minuteFloor && highYesChance <= 1 - BTTS_NO_DIRECTION_THRESHOLD && noChanceSide != null) {
       candidates.push({
         key: `${prefix}-no`, icon: '⏸', title: `${label} Hayır yönü`,
         market: half ? 'İlk yarı karşılıklı gol' : 'Karşılıklı gol',
         level: 'medium', levelLabel: 'xG yönü', side: noChanceSide,
-        reason: `${data.names[noChanceSide]} henüz gol bulmadı; Poisson xG temposunda KG Evet yönü eşik altında ve kalan süre uzatımı ${lambda[noChanceSide].toFixed(2)}.`,
+        reason: `${data.names[noChanceSide]} henüz gol bulmadı; yüksek tempo senaryosunda bile KG Evet yönü eşiğin altında ve kalan xG uzatımı ${scenarios.high[noChanceSide].toFixed(2)}.`,
       });
     }
   }
@@ -247,29 +291,35 @@
     }
 
     if (!regularMatch || data.minute < 12) return candidates;
-    const matchLambda = remainingXg(data, REGULATION_END_MINUTE);
-    if (!matchLambda) return candidates;
-    if (data.minute >= 18 && data.minute <= 80) pushRemainderResult(candidates, data, matchLambda);
+    const matchScenarios = remainingXgScenarios(data, REGULATION_END_MINUTE);
+    if (!matchScenarios) return candidates;
+    if (data.minute >= 18 && data.minute <= 80) pushRemainderResult(candidates, data, matchScenarios);
     const score = validPair(data.score);
     if (!score) return candidates;
     const currentTotal = score[0] + score[1];
-    const matchForecast = currentTotal + matchLambda[0] + matchLambda[1];
+    const matchForecast = currentTotal + matchScenarios.base[0] + matchScenarios.base[1];
+    const matchForecastLow = currentTotal + matchScenarios.low[0] + matchScenarios.low[1];
+    const matchForecastHigh = currentTotal + matchScenarios.high[0] + matchScenarios.high[1];
     pushLineSignal(candidates, data, {
-      half: false, line: lines.matchTotal, forecast: matchForecast, currentGoals: currentTotal,
+      half: false, line: lines.matchTotal, forecast: matchForecast,
+      forecastLow: matchForecastLow, forecastHigh: matchForecastHigh, currentGoals: currentTotal,
     });
     pushBttsSignal(candidates, data, {
-      half: false, score, lambda: matchLambda, minuteFloor: 68,
+      half: false, score, scenarios: matchScenarios, minuteFloor: 68,
     });
 
     if (regularFirstHalf) {
-      const halfLambda = remainingXg(data, FIRST_HALF_END_MINUTE);
-      if (halfLambda) {
+      const halfScenarios = remainingXgScenarios(data, FIRST_HALF_END_MINUTE);
+      if (halfScenarios) {
+        const halfForecast = currentTotal + halfScenarios.base[0] + halfScenarios.base[1];
         pushLineSignal(candidates, data, {
-          half: true, line: lines.firstHalfTotal, forecast: currentTotal + halfLambda[0] + halfLambda[1],
+          half: true, line: lines.firstHalfTotal, forecast: halfForecast,
+          forecastLow: currentTotal + halfScenarios.low[0] + halfScenarios.low[1],
+          forecastHigh: currentTotal + halfScenarios.high[0] + halfScenarios.high[1],
           currentGoals: currentTotal,
         });
         pushBttsSignal(candidates, data, {
-          half: true, score, lambda: halfLambda, minuteFloor: 37,
+          half: true, score, scenarios: halfScenarios, minuteFloor: 37,
         });
       }
     }
@@ -346,8 +396,12 @@
       firstHalfTotal: [0.5, 1.5, 2.5].includes(Number(lines.firstHalfTotal)) ? Number(lines.firstHalfTotal) : 1.5,
     };
     candidates.push(...makeMarketCandidates(data, safeLines));
+    for (const candidate of candidates) {
+      candidate.group = /^(next-goal-|rest-result-|btts-|half-btts-|match-|half-)/.test(candidate.key)
+        ? 'market' : 'activity';
+    }
     return candidates;
   }
 
-  return { ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, poissonOutcomes };
+  return { ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes };
 }));

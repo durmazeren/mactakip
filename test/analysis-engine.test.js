@@ -4,7 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
-const { ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, poissonOutcomes } = require('../src/js/analysis-engine.js');
+const {
+  ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios, scenarioBand, poissonOutcomes,
+} = require('../src/js/analysis-engine.js');
 
 function fixture(overrides = {}) {
   const data = {
@@ -43,8 +45,8 @@ test('next-goal and remaining-match direction follow recent pressure, not curren
 test('half-time totals and half-time BTTS are limited to first-half live play', () => {
   const firstHalf = fixture({
     phase: '1Y', minute: 18, score: [0, 0],
-    changes: { shots: [5, 3], sot: [2, 1], xg: [0.3, 0.3] },
-    cumulativeXg: [1.1, 0.9], totalShots: 8, totalSot: 3, totalXg: 0.6,
+    changes: { shots: [5, 3], sot: [2, 1], xg: [0.5, 0.5] },
+    cumulativeXg: [1.5, 1.3], totalShots: 8, totalSot: 3, totalXg: 1.0,
   });
   const firstKeys = keys(firstHalf, { matchTotal: 2.5, firstHalfTotal: 0.5 });
   assert.ok(firstKeys.includes('half-over-0_5'));
@@ -97,6 +99,30 @@ test('Poisson remaining-goal outcomes are normalized and symmetric', () => {
   assert.ok(Math.abs(balanced.home - balanced.away) < 1e-12);
   assert.ok(Math.abs(balanced.home + balanced.draw + balanced.away - 1) < 1e-12);
   assert.equal(poissonOutcomes([0, 0]).draw, 1);
+});
+
+test('xG projection exposes ordered low/base/high scenarios and widens with tempo disagreement', () => {
+  const stable = fixture({ changes: { xg: [0.136, 0.027] } });
+  const volatile = fixture({ changes: { xg: [1.1, 0] } });
+  const stableRange = remainingXgScenarios(stable, 94);
+  const volatileRange = remainingXgScenarios(volatile, 94);
+  assert.ok(stableRange.low.every((value, side) => value <= stableRange.base[side]));
+  assert.ok(stableRange.high.every((value, side) => value >= stableRange.base[side]));
+  const width = (range) => range.high.reduce((sum, value, side) => sum + value - range.low[side], 0);
+  assert.ok(width(volatileRange) > width(stableRange));
+  assert.ok(['narrow', 'medium', 'wide'].includes(scenarioBand(volatileRange).key));
+});
+
+test('a total line that clears only the central tempo scenario is suppressed', () => {
+  const borderline = fixture({ score: [0, 0] });
+  const found = keys(borderline, { matchTotal: 1.5, firstHalfTotal: 1.5 });
+  assert.ok(!found.includes('match-over-1_5'));
+});
+
+test('market directions and activity observations are grouped separately', () => {
+  const candidates = makeAnalysisCandidates(fixture(), { matchTotal: 2.5, firstHalfTotal: 1.5 });
+  assert.ok(candidates.some((candidate) => candidate.key.startsWith('next-goal-') && candidate.group === 'market'));
+  assert.ok(candidates.some((candidate) => candidate.key === 'total-goals' && candidate.group === 'activity'));
 });
 
 test('next-goal pressure is normalized to a five-minute window', () => {
@@ -158,4 +184,8 @@ test('renderer loads the pure engine before analysis and exposes both line selec
   assert.ok(html.indexOf('js/analysis-engine.js') < html.indexOf('js/analysis.js'));
   assert.match(html, /id="analysisMatchLine"/);
   assert.match(html, /id="analysisHalfLine"/);
+  assert.match(html, /aria-live="polite"/);
+  const renderer = readFileSync(path.join(__dirname, '../src/js/analysis.js'), 'utf8');
+  assert.match(renderer, /Bahis market yönleri/);
+  assert.match(renderer, /Maç içi aktivite/);
 });

@@ -191,9 +191,11 @@ function analysisResult(id, now = Date.now()) {
   const confirmations = analysisConfirmations.get(id) || {};
   const signals = makeAnalysisCandidates(data)
     .filter((candidate) => confirmations[candidate.key] >= ANALYSIS_CONFIRMATIONS);
+  const projection = AnalysisEngine.remainingXgScenarios(data, data.phase === '1Y' ? 49 : 94);
   return {
     ...data,
     signals,
+    projectionBand: AnalysisEngine.scenarioBand(projection),
     teamBands: [
       activityBand(data.changes, 0, data.elapsedMs),
       activityBand(data.changes, 1, data.elapsedMs),
@@ -226,7 +228,7 @@ function analysisScoreText(ev) {
 }
 
 function makeSignalRow(signal) {
-  const row = el('article', `analysis-signal ${signal.level}`);
+  const row = el('article', `analysis-signal ${signal.level} ${signal.group || 'activity'}`);
   const top = el('div', 'signal-top');
   top.append(
     el('span', 'signal-icon', signal.icon),
@@ -241,6 +243,20 @@ function makeMetric(label, pair, digits = 0) {
   const row = el('div', 'analysis-metric');
   row.append(el('span', null, label), el('b', null, pairLabel(pair, digits)));
   return row;
+}
+
+function makeSignalSection(title, signals, kind) {
+  if (!signals.length) return null;
+  const section = el('section', `analysis-signal-section ${kind}`);
+  const heading = el('div', 'analysis-section-head');
+  heading.append(
+    el('b', null, title),
+    el('span', null, String(signals.length)),
+  );
+  const list = el('div', 'analysis-signals');
+  signals.forEach((signal) => list.append(makeSignalRow(signal)));
+  section.append(heading, list);
+  return section;
 }
 
 function buildAnalysisCard(id, result = analysisResult(id)) {
@@ -285,6 +301,9 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
     el('span', 'analysis-window', `${analysisDuration(result.elapsedMs)} ölçüm`),
     el('span', 'analysis-freshness', `Kontrol ${analysisDuration(result.dataAgeMs)} önce`),
   );
+  if (result.projectionBand) {
+    topMeta.append(el('span', `analysis-projection-range ${result.projectionBand.key}`, `Tempo aralığı ${result.projectionBand.label.toLowerCase()}`));
+  }
   card.append(topMeta);
 
   const teamGrid = el('div', 'analysis-team-grid');
@@ -313,12 +332,15 @@ function buildAnalysisCard(id, result = analysisResult(id)) {
 
   const scoreContext = el('div', 'analysis-context', marketContext(result));
   card.append(scoreContext);
+  const marketSignals = result.signals.filter((signal) => signal.group === 'market');
+  const activitySignals = result.signals.filter((signal) => signal.group !== 'market');
   if (!result.signals.length) {
     card.append(el('div', 'analysis-no-signal', 'Bu ölçümde eşik aşan, iki kontrolde doğrulanmış sinyal yok.'));
   } else {
-    const signalList = el('div', 'analysis-signals');
-    result.signals.forEach((signal) => signalList.append(makeSignalRow(signal)));
-    card.append(signalList);
+    const marketSection = makeSignalSection('Bahis market yönleri', marketSignals, 'market');
+    const activitySection = makeSignalSection('Maç içi aktivite', activitySignals, 'activity');
+    if (marketSection) card.append(marketSection);
+    if (activitySection) card.append(activitySection);
   }
   return card;
 }
@@ -330,11 +352,13 @@ function renderAnalysisList() {
   const results = state.matches.map((match) => analysisResult(match.id));
   const activeCount = results.reduce((sum, result) => sum + (result.signals?.length || 0), 0);
   const activeMatches = results.filter((result) => result.signals?.length).length;
+  const marketCount = results.reduce((sum, result) => sum + (result.signals?.filter((signal) => signal.group === 'market').length || 0), 0);
+  const activityCount = results.reduce((sum, result) => sum + (result.signals?.filter((signal) => signal.group !== 'market').length || 0), 0);
   const summary = $('#analysisSummary');
   if (summary) {
     summary.replaceChildren(
       el('b', null, activeCount ? `${activeCount} aktif sinyal` : 'Aktif sinyal yok'),
-      el('span', null, `${activeMatches} maçta · 9 market ailesi izleniyor`),
+      el('span', null, `${activeMatches} maçta · ${marketCount} market yönü · ${activityCount} aktivite`),
     );
     summary.classList.toggle('has-active', activeCount > 0);
   }
