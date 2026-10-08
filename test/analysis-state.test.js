@@ -43,12 +43,13 @@ test('API outcomes keep failed, not-found, partial, empty, mismatched, and compl
 
 test('poll integration rejects stale revisions and only records complete event/stat responses', () => {
   const app = readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
-  assert.match(app, /LiveAnalysisState\.classifyApiResponse\(eventResponse, 'event', id\)/);
-  assert.match(app, /LiveAnalysisState\.classifyApiResponse\(statsResponse, 'statistics', id\)/);
+  assert.match(app, /LiveAnalysisState\.classifyApiResponse\(packet, endpoint, id\)/);
+  assert.match(app, /eventResponse\.validationResult/);
+  assert.match(app, /statsResponse\.validationResult/);
   assert.match(app, /state\.pollRevision\.get\(id\) !== revision/);
   assert.match(app, /eventResult\.kind === 'complete' && statsResult\.kind === 'complete'/);
   assert.match(app, /previousIdentity !== nextIdentity/);
-  assert.match(app, /classifyOddsResponse\(oddsResponse\)/);
+  assert.match(app, /LiveAnalysisState\.classifyOddsResponse\(packet\)/);
 });
 
 test('provider period clock computes live minute, announced added time, and extra-time periods', () => {

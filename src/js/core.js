@@ -6,13 +6,14 @@ const POLL_MS = 10_000;
 const IDLE_POLL_MS = 60_000;          // başlamamış maçlar için
 const SCHEDULER_TICK_MS = 500;
 const POLL_CONCURRENCY = 4;
-const POLL_ENDPOINTS = Object.freeze(['event', 'statistics', 'odds']);
+const POLL_ENDPOINTS = Object.freeze(['event', 'statistics', 'odds', 'incidents']);
 const POLL_INTERVALS = Object.freeze({
   event: Object.freeze({ base: 10_000, hot: 5_000, priority: 3_500, quiet: 20_000, maxQuiet: 60_000 }),
   statistics: Object.freeze({ base: 10_000, hot: 8_000, priority: 5_000, quiet: 30_000, maxQuiet: 60_000 }),
   odds: Object.freeze({ base: 10_000, hot: 5_000, priority: 2_000, quiet: 30_000, maxQuiet: 60_000 }),
+  incidents: Object.freeze({ base: 10_000, hot: 5_000, priority: 3_500, quiet: 20_000, maxQuiet: 60_000 }),
 });
-const POLL_STALE_HORIZONS = Object.freeze({ event: 35_000, statistics: 35_000, odds: 10_000 });
+const POLL_STALE_HORIZONS = Object.freeze({ event: 35_000, statistics: 35_000, odds: 10_000, incidents: 35_000 });
 const MOMENTUM_RELOAD_MS = 60_000;    // atak grafiği kendi kendine güncellenmiyor
 const CATALOG_TTL_MS = 60_000;
 const MAX_ANIM = 12;
@@ -33,7 +34,7 @@ const STAGE_CSS = `
 `;
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const api = (path) => window.sofa.get(path);
+const api = (path, options) => PollingQuality.requestGate.run(() => window.sofa.get(path), options);
 
 function load(key, fallback) {
   try {
@@ -48,6 +49,7 @@ function save(key, value) {
 const state = {
   matches: loadMatches(),            // [{ id, anim }] — anim: false ise sadece şut ekranında
   events: new Map(),                 // id -> son event verisi
+  eventIncidents: new Map(),         // id -> son doÄŸrulanmÄ±ÅŸ /incidents snapshot'ı
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
   liveOdds: new Map(),               // id -> son canlı fiyatlar; API zaman damgası doğrulanmadan model teyidi sayılmaz
   apiStatus: new Map(),              // id -> event/statistics/odds yanıtlarının ayrı sağlık durumu
@@ -226,6 +228,59 @@ const PollingQuality = (() => {
     'updateTimestamp', 'lastUpdate', 'timestamp', 'generatedAt', 'sourceTimestamp',
   ]);
 
+  function createRequestLimiter(maxConcurrent = 8, clock = Date.now) {
+    const limit = Math.max(1, Math.floor(maxConcurrent));
+    const queue = [];
+    let active = 0;
+    let sequence = 0;
+    const drain = () => {
+      while (active < limit && queue.length) {
+        const task = queue.shift();
+        task.signal?.removeEventListener?.('abort', task.onAbort);
+        active++;
+        task.startedAt = clock();
+        try { task.onStart?.(task.startedAt, { queuedAt: task.queuedAt, queueWaitMs: Math.max(0, task.startedAt - task.queuedAt) }); }
+        catch { /* telemetry must not interrupt the request */ }
+        let request;
+        try { request = task.operation(); }
+        catch (error) { request = Promise.reject(error); }
+        Promise.resolve(request).then(task.resolve, task.reject).finally(() => {
+          active--;
+          drain();
+        });
+      }
+    };
+    const run = (operation, options = {}) => new Promise((resolve, reject) => {
+      if (typeof operation !== 'function') {
+        reject(new TypeError('A request operation is required'));
+        return;
+      }
+      const task = {
+        operation, resolve, reject, onStart: options.onStart, signal: options.signal,
+        queuedAt: clock(), sequence: sequence++,
+      };
+      task.onAbort = () => {
+        const index = queue.indexOf(task);
+        if (index < 0) return;
+        queue.splice(index, 1);
+        reject(task.signal?.reason || Object.assign(new Error('Request cancelled before dispatch'), { name: 'AbortError' }));
+      };
+      if (task.signal?.aborted) {
+        reject(task.signal.reason || Object.assign(new Error('Request cancelled before dispatch'), { name: 'AbortError' }));
+        return;
+      }
+      task.signal?.addEventListener?.('abort', task.onAbort, { once: true });
+      queue.push(task);
+      drain();
+    });
+    return Object.freeze({
+      run,
+      snapshot: () => Object.freeze({ active, queued: queue.length, limit }),
+    });
+  }
+
+  const requestGate = createRequestLimiter(8);
+
   function classifyRequestError(error) {
     const message = String(error?.message || error || 'request failed');
     const status = message.match(/(?:Sofascore\s+|HTTP\s+|status\s*)(\d{3})/i)?.[1];
@@ -238,29 +293,45 @@ const PollingQuality = (() => {
   }
 
   async function captureRequest(request, path, clock = Date.now, timeoutMs = 15_000, timers = globalThis) {
-    const requestStartedAt = clock();
+    const requestQueuedAt = clock();
+    let requestStartedAt = null;
+    let queueWaitMs = 0;
     let timeoutId;
-    const settled = Promise.resolve().then(() => request(path)).then((value) => {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const onStart = (startedAt, queue) => {
+      requestStartedAt = Number.isFinite(startedAt) ? startedAt : clock();
+      queueWaitMs = Number.isFinite(queue?.queueWaitMs) ? queue.queueWaitMs : Math.max(0, requestStartedAt - requestQueuedAt);
+    };
+    const settled = Promise.resolve().then(() => request(path, { onStart, signal: controller?.signal })).then((value) => {
       const receivedAt = clock();
+      const startedAt = requestStartedAt ?? requestQueuedAt;
       return {
         kind: value === null ? 'not-found' : 'success', value,
-        requestStartedAt, receivedAt, latencyMs: Math.max(0, receivedAt - requestStartedAt),
+        requestQueuedAt, requestStartedAt: startedAt, receivedAt,
+        queueWaitMs, latencyMs: Math.max(0, receivedAt - startedAt),
+        elapsedMs: Math.max(0, receivedAt - requestQueuedAt),
       };
     }).catch((error) => {
       const receivedAt = clock();
       const classified = classifyRequestError(error);
+      const startedAt = requestStartedAt ?? requestQueuedAt;
       return {
         kind: 'failed', error, errorClass: classified.key, httpStatus: classified.status,
-        requestStartedAt, receivedAt, latencyMs: Math.max(0, receivedAt - requestStartedAt),
+        requestQueuedAt, requestStartedAt: startedAt, receivedAt,
+        queueWaitMs, latencyMs: Math.max(0, receivedAt - startedAt),
+        elapsedMs: Math.max(0, receivedAt - requestQueuedAt),
       };
     });
     const timeout = new Promise((resolve) => {
       timeoutId = timers.setTimeout(() => {
         const receivedAt = clock();
+        controller?.abort(Object.assign(new Error(`Request timed out after ${timeoutMs} ms`), { name: 'AbortError' }));
         resolve({
           kind: 'failed', error: new Error(`Request timed out after ${timeoutMs} ms`),
-          errorClass: 'timeout', httpStatus: null, requestStartedAt, receivedAt,
-          latencyMs: Math.max(0, receivedAt - requestStartedAt),
+          errorClass: 'timeout', httpStatus: null, requestQueuedAt,
+          requestStartedAt: requestStartedAt ?? requestQueuedAt, receivedAt,
+          queueWaitMs, latencyMs: Math.max(0, receivedAt - (requestStartedAt ?? requestQueuedAt)),
+          elapsedMs: Math.max(0, receivedAt - requestQueuedAt),
         });
       }, timeoutMs);
     });
@@ -375,28 +446,87 @@ const PollingQuality = (() => {
       .slice(0, 20);
   }
 
+  function classifyIncidentsResponse(payload, matchId) {
+    const incidents = Array.isArray(payload) ? payload : payload?.incidents;
+    if (!Array.isArray(incidents)) return { kind: payload == null ? 'not-found' : 'invalid', incidents: null };
+    const expectedId = Number(matchId);
+    const mismatch = incidents.some((incident) => Number.isFinite(expectedId)
+      && incident?.eventId != null && Number(incident.eventId) !== expectedId);
+    return mismatch ? { kind: 'mismatch', incidents: null } : { kind: 'complete', incidents };
+  }
+
+  function criticalIncidentKeys(incidents) {
+    if (!Array.isArray(incidents)) return [];
+    const keys = [];
+    for (const incident of incidents) {
+      const text = [incident?.incidentType, incident?.type, incident?.incident,
+        incident?.incidentClass, incident?.description, incident?.name, incident?.status]
+        .filter(Boolean).join(' ').toLowerCase();
+      const incidentType = String(incident?.incidentType || incident?.type || '').toLowerCase();
+      const incidentClass = String(incident?.incidentClass || '').toLowerCase();
+      let kind = null;
+      if (/\bvar\b|video assistant|video review/.test(text)) kind = 'var';
+      else if (/penalt/.test(text)) kind = 'penalty';
+      else if ((incidentType === 'card' && ['red', 'yellowred'].includes(incidentClass))
+        || /red.?card|yellow.?red|second yellow/.test(text)) kind = 'red-card';
+      else if (/\bgoal\b/.test(text)) kind = 'goal';
+      if (!kind) continue;
+      const detail = String(incident?.id ?? incident?.eventId
+        ?? `${incident?.timeSeconds ?? incident?.time ?? incident?.minute ?? ''}|${incident?.incidentClass ?? ''}|${incident?.description ?? incident?.name ?? ''}`);
+      keys.push(`${kind}:${detail}`.slice(0, 180));
+    }
+    return [...new Set(keys)].sort();
+  }
+
+  function newCriticalIncidentKeys(previous, current) {
+    if (!Array.isArray(previous) || !Array.isArray(current)) return [];
+    const known = new Set(criticalIncidentKeys(previous));
+    return criticalIncidentKeys(current).filter((key) => !known.has(key));
+  }
+
+  function priorityDueAt(now, priorityIntervalMs, immediate = false) {
+    return immediate ? now : now + priorityIntervalMs;
+  }
+
+  function resolveWaiters(waiters, result) {
+    const pending = Array.isArray(waiters) ? [...waiters] : [];
+    for (const resolve of pending) {
+      try { resolve(result); } catch { /* one consumer must not block the others */ }
+    }
+    return pending.length;
+  }
+
+  function effectivePollPriority(priority, waitedMs) {
+    const base = Number.isFinite(priority) ? priority : 0;
+    const wait = Number.isFinite(waitedMs) ? Math.max(0, waitedMs) : 0;
+    return base + Math.min(2, wait / 15_000);
+  }
+
   function ageRecord(record, now = Date.now()) {
     if (!record) return null;
     const receivedAgeMs = Number.isFinite(record.receivedAt) ? Math.max(0, now - record.receivedAt) : null;
+    const payloadAgeMs = Number.isFinite(record.payloadReceivedAt) ? Math.max(0, now - record.payloadReceivedAt) : null;
     const sourceAgeMs = Number.isFinite(record.sourceUpdatedAt) ? Math.max(0, now - record.sourceUpdatedAt) : null;
     const unchangedAgeMs = Number.isFinite(record.lastChangedAt) ? Math.max(0, now - record.lastChangedAt) : null;
-    const dataAgeMs = sourceAgeMs == null ? unchangedAgeMs : sourceAgeMs;
+    const dataAgeMs = sourceAgeMs == null ? payloadAgeMs : sourceAgeMs;
     const staleHorizonMs = record.staleHorizonMs || POLL_STALE_HORIZONS[record.endpoint] || 120_000;
     return {
       ...record,
       receivedAgeMs,
+      payloadAgeMs,
       sourceAgeMs,
       unchangedAgeMs,
       dataAgeMs,
       staleHorizonMs,
-      frozen: (unchangedAgeMs != null && unchangedAgeMs > staleHorizonMs)
-        || (dataAgeMs != null && dataAgeMs > staleHorizonMs),
+      unchangedConcern: unchangedAgeMs != null && unchangedAgeMs > staleHorizonMs,
+      frozen: (sourceAgeMs != null && sourceAgeMs > staleHorizonMs)
+        || (payloadAgeMs != null && payloadAgeMs > staleHorizonMs),
     };
   }
 
-  function observe(previous, packet, validationKind = packet?.kind, now = packet?.receivedAt ?? Date.now(), endpoint = 'event') {
+  function observe(previous, packet, validationKind = packet?.kind, now = packet?.receivedAt ?? Date.now(), endpoint = 'event', stages = {}) {
     const prior = previous || {};
-    const hasPayload = packet?.kind === 'success' && packet.value != null;
+    const hasPayload = packet?.kind === 'success' && packet.value != null && validationKind === 'complete';
     const nextFingerprint = hasPayload ? fingerprint(packet.value) : prior.fingerprint ?? null;
     const nextFields = hasPayload ? fieldFingerprints(packet.value, endpoint) : prior.fieldFingerprints || {};
     const changedFields = hasPayload ? changedFieldPaths(prior.fieldFingerprints, nextFields) : [];
@@ -409,9 +539,12 @@ const PollingQuality = (() => {
     const unchangedAgeMs = lastChangedAt == null ? null : Math.max(0, now - lastChangedAt);
     const sourceAgeMs = sourceUpdatedAt == null ? null : Math.max(0, now - sourceUpdatedAt);
     const staleHorizonMs = POLL_STALE_HORIZONS[endpoint] || 120_000;
-    const dataAgeMs = sourceAgeMs == null ? unchangedAgeMs : sourceAgeMs;
-    const frozen = (unchangedAgeMs != null && unchangedAgeMs > staleHorizonMs)
-      || (dataAgeMs != null && dataAgeMs > staleHorizonMs);
+    const payloadReceivedAt = hasPayload ? receivedAt : prior.payloadReceivedAt ?? null;
+    const payloadAgeMs = payloadReceivedAt == null ? null : Math.max(0, now - payloadReceivedAt);
+    const dataAgeMs = sourceAgeMs == null ? payloadAgeMs : sourceAgeMs;
+    const unchangedConcern = unchangedAgeMs != null && unchangedAgeMs > staleHorizonMs;
+    const frozen = (sourceAgeMs != null && sourceAgeMs > staleHorizonMs)
+      || (payloadAgeMs != null && payloadAgeMs > staleHorizonMs);
     const requestFailed = packet?.kind === 'failed';
     const consecutiveFailures = requestFailed ? (prior.consecutiveFailures || 0) + 1 : 0;
     return {
@@ -419,13 +552,23 @@ const PollingQuality = (() => {
       kind: validationKind || packet?.kind || 'unknown',
       requestKind: packet?.kind || 'unknown',
       requestStartedAt: Number.isFinite(packet?.requestStartedAt) ? packet.requestStartedAt : receivedAt,
+      requestQueuedAt: Number.isFinite(packet?.requestQueuedAt) ? packet.requestQueuedAt : null,
+      queueWaitMs: Number.isFinite(packet?.queueWaitMs) ? packet.queueWaitMs : null,
       receivedAt,
       latencyMs: Number.isFinite(packet?.latencyMs) ? packet.latencyMs : null,
+      elapsedMs: Number.isFinite(packet?.elapsedMs) ? packet.elapsedMs : null,
+      validatedAt: Number.isFinite(stages.validatedAt) ? stages.validatedAt : null,
+      validationLatencyMs: Number.isFinite(stages.validatedAt) ? Math.max(0, stages.validatedAt - receivedAt) : null,
+      committedAt: Number.isFinite(stages.committedAt) ? stages.committedAt : null,
+      commitLatencyMs: Number.isFinite(stages.committedAt) ? Math.max(0, stages.committedAt - receivedAt) : null,
       sourceUpdatedAt,
       sourceAgeMs,
       receivedAgeMs: Math.max(0, now - receivedAt),
+      payloadReceivedAt,
+      payloadAgeMs,
       dataAgeMs,
       unchangedAgeMs,
+      unchangedConcern,
       staleHorizonMs,
       frozen,
       fingerprint: nextFingerprint,
@@ -471,12 +614,19 @@ const PollingQuality = (() => {
   }
 
   function comparePollCandidates(left, right) {
-    return (right.priority || 0) - (left.priority || 0)
+    return (Number.isFinite(right.effectivePriority) ? right.effectivePriority : (right.priority || 0))
+      - (Number.isFinite(left.effectivePriority) ? left.effectivePriority : (left.priority || 0))
       || (left.earliest || 0) - (right.earliest || 0)
       || Number(left.id) - Number(right.id);
   }
 
-  return Object.freeze({ classifyRequestError, captureRequest, sourceTimestamp, fingerprint, fieldFingerprints, changedFieldPaths, ageRecord, observe, nextDelay, due, comparePollCandidates });
+  return Object.freeze({
+    classifyRequestError, createRequestLimiter, requestGate, captureRequest,
+    sourceTimestamp, fingerprint, fieldFingerprints, changedFieldPaths,
+    classifyIncidentsResponse, criticalIncidentKeys, newCriticalIncidentKeys,
+    effectivePollPriority, priorityDueAt, resolveWaiters,
+    ageRecord, observe, nextDelay, due, comparePollCandidates,
+  });
 })();
 
 globalThis.PollingQuality = PollingQuality;

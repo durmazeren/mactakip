@@ -38,6 +38,7 @@ function setAnim(id, anim) {
 }
 
 function removeMatch(id) {
+  cancelPollWaiters(id, { ok: false, failed: false, changed: false, skipped: true, removed: true });
   state.pollRevision.set(id, (state.pollRevision.get(id) || 0) + 1);
   state.matches = state.matches.filter((m) => m.id !== id);
   saveMatches();
@@ -45,7 +46,9 @@ function removeMatch(id) {
   removeTargetsOf(id);
   forgetAlerts(id);
   state.events.delete(id);
+  state.eventIncidents.delete(id);
   state.stats.delete(id);
+  state.liveOdds.delete(id);
   state.apiStatus.delete(id);
   state.lastPoll.delete(id);
   state.pollState.delete(id);
@@ -67,6 +70,10 @@ async function resetMatch(id) {
     .filter(Boolean).map((n) => $('.reset-btn', n));
   buttons.forEach((b) => b.classList.add('spinning'));
   state.stats.delete(id);
+  state.liveOdds.delete(id);
+  state.eventIncidents.delete(id);
+  const priorEvent = state.events.get(id);
+  if (priorEvent) state.events.set(id, { ...priorEvent, incidents: [] });
   state.lastPoll.delete(id);
   state.lastOddsPoll.delete(id);
   state.apiStatus.delete(id);
@@ -106,6 +113,8 @@ function refresh(animate) {
 
 const ENDPOINT_LABELS = { event: 'Maç', statistics: 'İstatistik', odds: 'Oran' };
 
+ENDPOINT_LABELS.incidents = 'Olay';
+
 function matchPollState(id) {
   let entry = state.pollState.get(id);
   if (!entry) {
@@ -135,22 +144,23 @@ function endpointNamesDue(id, now = Date.now()) {
     const kickoffInMs = Number.isFinite(event.startTimestamp) ? event.startTimestamp * 1000 - now : Infinity;
     schedule.endpoints.event.normalDelay = kickoffInMs > 120_000 ? IDLE_POLL_MS : POLL_INTERVALS.event.base;
   } else if (isLive(event)) {
-    eligible.push('statistics');
+    eligible.push('statistics', 'incidents');
     if ([6, 7, 41, 42].includes(event.status?.code)) eligible.push('odds');
   }
   return eligible.filter((endpoint) => PollingQuality.due(schedule.endpoints[endpoint], now));
 }
 
-function scheduleEndpoint(id, endpoint, packet, kind, now = Date.now()) {
+function scheduleEndpoint(id, endpoint, packet, kind, now = Date.now(), stages = {}) {
   const schedule = matchPollState(id);
   const endpointState = schedule.endpoints[endpoint];
   const old = state.pollTelemetry.get(id)?.[endpoint];
-  const record = PollingQuality.observe(old, packet, kind, now);
+  const record = PollingQuality.observe(old, packet, kind, now, endpoint, stages);
   const priority = endpointState.priorityRounds > 0 && now < schedule.priorityUntil;
+  const priorityDelay = priority && endpointState.priorityRounds > 1;
   const live = isLive(state.events.get(id));
   const interval = endpointState.normalDelay || POLL_INTERVALS[endpoint].base;
   const delay = live
-    ? PollingQuality.nextDelay(endpoint, record, { priority, hot: now < schedule.hotUntil })
+    ? PollingQuality.nextDelay(endpoint, record, { priority: priorityDelay, hot: now < schedule.hotUntil })
     : interval;
   endpointState.nextDueAt = Number.isFinite(delay) ? record.receivedAt + delay : Infinity;
   endpointState.lastRequestAt = record.requestStartedAt;
@@ -162,19 +172,23 @@ function scheduleEndpoint(id, endpoint, packet, kind, now = Date.now()) {
   return record;
 }
 
-function prioritizeMatch(id, now = Date.now()) {
+function prioritizeMatch(id, now = Date.now(), { immediate = false, eventKey = null } = {}) {
   const schedule = matchPollState(id);
-  if (schedule.lastPriorityAt && now - schedule.lastPriorityAt < 30_000) return false;
+  if (eventKey && schedule.lastPriorityKey === eventKey) return false;
+  if (!eventKey && schedule.lastPriorityAt && now - schedule.lastPriorityAt < 30_000) return false;
   schedule.lastPriorityAt = now;
+  schedule.lastPriorityKey = eventKey || schedule.lastPriorityKey || null;
   schedule.hotUntil = Math.max(schedule.hotUntil, now + 30_000);
   schedule.priorityUntil = now + 20_000;
   for (const endpoint of POLL_ENDPOINTS) {
     const endpointState = schedule.endpoints[endpoint];
-    endpointState.priorityRounds = 2;
-    endpointState.nextDueAt = Math.min(endpointState.nextDueAt, now + POLL_INTERVALS[endpoint].priority);
+    endpointState.priorityRounds = immediate ? 1 : 2;
+    const dueAt = PollingQuality.priorityDueAt(now, POLL_INTERVALS[endpoint].priority, immediate);
+    endpointState.nextDueAt = Math.min(endpointState.nextDueAt, dueAt);
     const record = state.pollTelemetry.get(id)?.[endpoint];
     if (record) record.nextDueAt = endpointState.nextDueAt;
   }
+  if (immediate) schedule.priorityEventAt = now;
   return true;
 }
 
@@ -198,30 +212,59 @@ async function runPollOne(id, requestedEndpoints) {
   if (!endpoints.length) return { ok: true, failed: false, changed: false, skipped: true };
   const previousEvent = state.events.get(id);
   const previousStats = state.stats.get(id)?.ALL;
+  const previousIncidents = state.eventIncidents.get(id);
   const capture = (endpoint) => {
-    const paths = { event: `event/${id}`, statistics: `event/${id}/statistics`, odds: `event/${id}/odds/1/all` };
-    return PollingQuality.captureRequest(api, paths[endpoint]);
+    const paths = {
+      event: `event/${id}`,
+      statistics: `event/${id}/statistics`,
+      odds: `event/${id}/odds/1/all`,
+      incidents: `event/${id}/incidents`,
+    };
+    return PollingQuality.captureRequest(api, paths[endpoint]).then((packet) => {
+      let validationResult;
+      if (endpoint === 'event' || endpoint === 'statistics') {
+        validationResult = LiveAnalysisState.classifyApiResponse(packet, endpoint, id);
+      } else if (endpoint === 'odds') {
+        validationResult = LiveAnalysisState.classifyOddsResponse(packet);
+      } else if (packet.kind === 'success') {
+        validationResult = PollingQuality.classifyIncidentsResponse(packet.value, id);
+      } else {
+        validationResult = { kind: packet.kind };
+      }
+      return { ...packet, validationResult, validatedAt: Date.now() };
+    });
   };
-  const [eventResponse, statsResponse, oddsResponse] = await Promise.all([
+  const [eventResponse, statsResponse, oddsResponse, incidentsResponse] = await Promise.all([
     endpoints.includes('event') ? capture('event') : null,
     endpoints.includes('statistics') ? capture('statistics') : null,
     endpoints.includes('odds') ? capture('odds') : null,
+    endpoints.includes('incidents') ? capture('incidents') : null,
     endpoints.includes('statistics') && needsPlayers(id) ? loadPlayers(id).catch(() => null) : null,
   ]);
   const eventPacket = eventResponse;
   const statsPacket = statsResponse;
   const oddsPacket = oddsResponse;
+  const incidentsPacket = incidentsResponse;
   if (state.pollRevision.get(id) !== revision || findMatch(id) !== matchRef) {
     return { ok: false, failed: false, changed: false, skipped: true, stale: true };
   }
 
   const eventResult = eventResponse
-    ? LiveAnalysisState.classifyApiResponse(eventResponse, 'event', id)
+    ? eventResponse.validationResult
     : { kind: 'skipped' };
   const statsResult = statsResponse
-    ? LiveAnalysisState.classifyApiResponse(statsResponse, 'statistics', id)
+    ? statsResponse.validationResult
     : { kind: 'skipped' };
-  const oddsShape = oddsResponse ? LiveAnalysisState.classifyOddsResponse(oddsResponse) : { kind: 'skipped' };
+  const oddsShape = oddsResponse ? oddsResponse.validationResult : { kind: 'skipped' };
+  const incidentsShape = incidentsResponse
+    ? { ...incidentsResponse.validationResult, incidents: incidentsResponse.validationResult.incidents ?? null }
+    : { kind: 'skipped', incidents: null };
+  const stages = {
+    event: { validatedAt: eventResponse?.validatedAt ?? null },
+    statistics: { validatedAt: statsResponse?.validatedAt ?? null },
+    odds: { validatedAt: oddsResponse?.validatedAt ?? null },
+    incidents: { validatedAt: incidentsResponse?.validatedAt ?? null },
+  };
   const previousIdentity = previousEvent && LiveAnalysisState.matchIdentity(previousEvent, id);
   const nextIdentity = eventResult.kind === 'complete'
     ? LiveAnalysisState.matchIdentity(eventResult.event, id) : previousIdentity;
@@ -242,19 +285,32 @@ async function runPollOne(id, requestedEndpoints) {
   if (eventResult.kind === 'complete') {
     if (eventReset) {
       forgetAnalysis(id);
-      if (previousIdentity !== nextIdentity) state.stats.delete(id);
+      if (previousIdentity !== nextIdentity) {
+        state.stats.delete(id);
+        state.eventIncidents.delete(id);
+      }
     }
-    state.events.set(id, eventResult.event);
+    const retainedIncidents = state.eventIncidents.get(id) || [];
+    state.events.set(id, { ...eventResult.event, incidents: retainedIncidents });
     state.lastPoll.set(id, eventPacket.receivedAt);
+    stages.event.committedAt = Date.now();
   }
 
   let parsedStats = null;
   if (statsResult.kind === 'complete') {
     parsedStats = parseStats(statsResult.value);
     state.stats.set(id, parsedStats);
+    stages.statistics.committedAt = Date.now();
+  }
+  if (incidentsShape.kind === 'complete') {
+    state.eventIncidents.set(id, incidentsShape.incidents);
+    const current = state.events.get(id);
+    if (current) state.events.set(id, { ...current, incidents: incidentsShape.incidents });
+    stages.incidents.committedAt = Date.now();
   }
   const currentEvent = state.events.get(id);
   const liveOddsPhase = isLive(currentEvent) && [6, 7, 41, 42].includes(currentEvent.status?.code);
+  if (eventReset) state.liveOdds.delete(id);
   let oddsResult = oddsShape;
   const latestEventMeta = state.pollTelemetry.get(id)?.event;
   const priorEventStatus = state.apiStatus.get(id)?.event;
@@ -266,9 +322,7 @@ async function runPollOne(id, requestedEndpoints) {
   if (oddsPacket && !eventReset && eventFreshForOdds && oddsShape.kind === 'complete' && liveOddsPhase) {
     const recorded = recordLiveOddsSnapshot(id, oddsPacket.value, currentEvent, oddsPacket.receivedAt);
     if (!recorded) oddsResult = { kind: 'empty' };
-    state.lastOddsPoll.set(id, oddsPacket.receivedAt);
-  } else if (oddsPacket) {
-    state.lastOddsPoll.set(id, oddsPacket.receivedAt);
+    else stages.odds.committedAt = Date.now();
   }
   if (!liveOddsPhase) state.liveOdds.delete(id);
 
@@ -278,22 +332,35 @@ async function runPollOne(id, requestedEndpoints) {
     event: eventPacket ? eventResult.kind : (previousApiStatus.event || 'skipped'),
     statistics: statsPacket ? statsResult.kind : (previousApiStatus.statistics || 'skipped'),
     odds: oddsPacket ? oddsResult.kind : (previousApiStatus.odds || 'skipped'),
+    incidents: incidentsPacket ? incidentsShape.kind : (previousApiStatus.incidents || 'skipped'),
     at: Date.now(),
   };
   state.apiStatus.set(id, apiStatus);
 
   const now = Date.now();
-  if (eventPacket) scheduleEndpoint(id, 'event', eventPacket, eventResult.kind, now);
-  if (statsPacket) scheduleEndpoint(id, 'statistics', statsPacket, statsResult.kind, now);
-  if (oddsPacket) scheduleEndpoint(id, 'odds', oddsPacket, oddsResult.kind, now);
+  if (eventPacket) scheduleEndpoint(id, 'event', eventPacket, eventResult.kind, now, stages.event);
+  if (statsPacket) scheduleEndpoint(id, 'statistics', statsPacket, statsResult.kind, now, stages.statistics);
+  if (oddsPacket) scheduleEndpoint(id, 'odds', oddsPacket, oddsResult.kind, now, stages.odds);
+  if (incidentsPacket) scheduleEndpoint(id, 'incidents', incidentsPacket, incidentsShape.kind, now, stages.incidents);
   const cardIncreased = parsedStats && pairIncreased(parsedStats.ALL?.redCards, previousStats?.redCards);
   const eventText = `${previousStatus.description || ''} ${nextStatus.description || ''}`;
   const criticalStatusText = /\b(var|penalt\w*|suspend\w*|interrupt\w*|stoppage)\b/i.test(eventText);
-  const priorityEvent = !!eventReset || !!cardIncreased || (!!descriptionChanged && criticalStatusText);
+  const identityChanged = !!previousIdentity && previousIdentity !== nextIdentity;
+  const newlyCriticalIncidents = PollingQuality.newCriticalIncidentKeys(
+    identityChanged ? [] : previousIncidents,
+    incidentsShape.kind === 'complete' ? incidentsShape.incidents : previousIncidents,
+  );
+  const priorityEvent = !!eventReset || !!cardIncreased || (!!descriptionChanged && criticalStatusText)
+    || newlyCriticalIncidents.length > 0;
+  const immediatePriority = !!scoreChanged || !!statusChanged || !!cardIncreased
+    || newlyCriticalIncidents.length > 0 || (!!descriptionChanged && criticalStatusText);
+  const priorityKey = priorityEvent
+    ? `${nextIdentity || id}|${(nextScore || []).join(':')}|${nextStatus.type || ''}:${nextStatus.code || ''}|${newlyCriticalIncidents.join(',') || (cardIncreased ? `card:${(parsedStats?.ALL?.redCards || []).join(':')}` : '')}`
+    : null;
   const hotData = !!(parsedStats && statsActivityIncreased(parsedStats.ALL, previousStats));
   const matchSchedule = matchPollState(id);
   if (hotData) matchSchedule.hotUntil = Math.max(matchSchedule.hotUntil, now + 30_000);
-  if (priorityEvent) prioritizeMatch(id, now);
+  if (priorityEvent) prioritizeMatch(id, now, { immediate: immediatePriority, eventKey: priorityKey });
 
   const eventMeta = state.pollTelemetry.get(id)?.event;
   const eventDataUsable = apiStatus.event === 'complete' && Number.isFinite(eventMeta?.receivedAt)
@@ -303,7 +370,15 @@ async function runPollOne(id, requestedEndpoints) {
   const statisticsMeta = state.pollTelemetry.get(id)?.statistics;
   recordAnalysisSnapshot(id, statsResult.kind === 'complete' && eventDataUsable && !statisticsMeta?.frozen);
   const analysisLatencyMs = Date.now() - analysisStartedAt;
+  const analysisAt = Date.now();
   const telemetry = state.pollTelemetry.get(id) || {};
+  for (const endpoint of ['event', 'statistics', 'odds', 'incidents']) {
+    const record = telemetry[endpoint];
+    if (record && Number.isFinite(record.receivedAt)) {
+      record.analysisAt = analysisAt;
+      record.receiveToAnalysisMs = Math.max(0, analysisAt - record.receivedAt);
+    }
+  }
   telemetry.analysisLatencyMs = analysisLatencyMs;
   telemetry.sameCycleComplete = sameCycleComplete;
   telemetry.pollStartedAt = pollStartedAt;
@@ -322,22 +397,39 @@ async function runPollOne(id, requestedEndpoints) {
     state.pollTelemetry.set(id, alertTelemetry);
   }
   updateFeedHealth();
-  const failed = [eventPacket, statsPacket, oddsPacket].some((packet) => packet?.kind === 'failed')
-    || [eventResult, statsResult, oddsResult].some((result) => ['failed', 'not-found', 'invalid', 'partial', 'mismatch'].includes(result.kind));
+  const failed = [eventPacket, statsPacket, oddsPacket, incidentsPacket].some((packet) => packet?.kind === 'failed')
+    || [eventResult, statsResult, oddsResult, incidentsShape].some((result) => ['failed', 'not-found', 'invalid', 'partial', 'mismatch'].includes(result.kind));
   return {
     ok: apiStatus.event === 'complete', failed,
     changed: !!(eventResult.kind === 'complete' && state.pollTelemetry.get(id)?.event?.changed)
       || !!(statsResult.kind === 'complete' && state.pollTelemetry.get(id)?.statistics?.changed)
-      || !!(oddsResult.kind === 'complete' && state.pollTelemetry.get(id)?.odds?.changed),
+      || !!(oddsResult.kind === 'complete' && state.pollTelemetry.get(id)?.odds?.changed)
+      || !!(incidentsShape.kind === 'complete' && state.pollTelemetry.get(id)?.incidents?.changed),
     priorityEvent,
   };
 }
 
 const pollQueue = new Map();
 const activePollJobs = new Map();
+const activePollWaiters = new Map();
+
+function cancelPollWaiters(id, result) {
+  const queued = pollQueue.get(id);
+  if (queued) {
+    pollQueue.delete(id);
+    PollingQuality.resolveWaiters(queued.waiters, result);
+  }
+  const activeWaiters = activePollWaiters.get(id) || [];
+  activePollWaiters.delete(id);
+  PollingQuality.resolveWaiters(activeWaiters, result);
+}
 
 function enqueuePoll(id, options = {}) {
   return new Promise((resolve) => {
+    if (!findMatch(id)) {
+      resolve({ ok: false, failed: false, changed: false, skipped: true, removed: true });
+      return;
+    }
     const existing = pollQueue.get(id);
     if (existing) {
       existing.force ||= !!options.force;
@@ -363,8 +455,13 @@ function dueOrdering(id, now) {
   const schedule = matchPollState(id);
   const due = endpointNamesDue(id, now);
   if (!due.length) return null;
-  const earliest = Math.min(...due.map((endpoint) => schedule.endpoints[endpoint].nextDueAt || 0));
-  return { id, endpoints: due, priority: pollPriority(id, now), earliest };
+  const deadlines = due.map((endpoint) => schedule.endpoints[endpoint].nextDueAt || 0);
+  const earliest = Math.min(...deadlines);
+  const priority = pollPriority(id, now);
+  return {
+    id, endpoints: due, priority, earliest,
+    effectivePriority: PollingQuality.effectivePollPriority(priority, earliest > 0 ? now - earliest : 0),
+  };
 }
 
 function collectPollCandidates(now = Date.now()) {
@@ -375,9 +472,10 @@ function collectPollCandidates(now = Date.now()) {
     const queued = pollQueue.get(id);
     if (queued?.force) {
       const event = state.events.get(id);
-      const endpoints = ['event', ...(isLive(event) ? ['statistics'] : []),
+      const endpoints = ['event', ...(isLive(event) ? ['statistics', 'incidents'] : []),
         ...(isLive(event) && [6, 7, 41, 42].includes(event.status?.code) ? ['odds'] : [])];
-      candidates.push({ id, endpoints, priority: 2, earliest: queued.enqueuedAt, queued });
+      const waitedMs = Math.max(0, now - queued.enqueuedAt);
+      candidates.push({ id, endpoints, priority: 2, effectivePriority: PollingQuality.effectivePollPriority(2, waitedMs), earliest: queued.enqueuedAt, queued });
       continue;
     }
     const scheduled = dueOrdering(id, now);
@@ -394,9 +492,16 @@ function settlePollRender(id, result) {
     renderAnalysisMatches([id]);
     const renderedAt = Date.now();
     const telemetry = state.pollTelemetry.get(id) || {};
-    const latestInputAt = Math.max(telemetry.event?.receivedAt || 0, telemetry.statistics?.receivedAt || 0, telemetry.odds?.receivedAt || 0);
+    const latestInputAt = Math.max(telemetry.event?.receivedAt || 0, telemetry.statistics?.receivedAt || 0, telemetry.odds?.receivedAt || 0, telemetry.incidents?.receivedAt || 0);
     telemetry.visibleAt = renderedAt;
     telemetry.receiveToUiMs = latestInputAt ? Math.max(0, renderedAt - latestInputAt) : null;
+    for (const endpoint of ['event', 'statistics', 'odds', 'incidents']) {
+      const record = telemetry[endpoint];
+      if (record && Number.isFinite(record.receivedAt)) {
+        record.visibleAt = renderedAt;
+        record.receiveToVisibleMs = Math.max(0, renderedAt - record.receivedAt);
+      }
+    }
     state.pollTelemetry.set(id, telemetry);
     state.pollRenderTelemetry = {
       latencyMs: performance.now() - renderStartedAt,
@@ -419,10 +524,13 @@ function pumpPollQueue(now = Date.now()) {
     if (queued) pollQueue.delete(candidate.id);
     const request = runPollOne(candidate.id, candidate.endpoints);
     let job;
+    activePollWaiters.set(candidate.id, queued?.waiters || []);
     job = Promise.resolve(request).catch((error) => ({
       ok: false, failed: true, changed: false, error: String(error?.message || error),
     })).then((result) => {
-      for (const resolve of queued?.waiters || []) resolve(result);
+      const waiters = activePollWaiters.get(candidate.id) || [];
+      activePollWaiters.delete(candidate.id);
+      PollingQuality.resolveWaiters(waiters, result);
       settlePollRender(candidate.id, result);
       return result;
     }).finally(() => {
@@ -489,7 +597,7 @@ function updateFeedHealth(now = Date.now()) {
     const endpoints = el('div', 'feed-health-sources');
     for (const endpoint of POLL_ENDPOINTS) {
       const active = endpoint === 'event' ? !isOver(event)
-        : endpoint === 'statistics' ? isLive(event)
+        : endpoint === 'statistics' || endpoint === 'incidents' ? isLive(event)
           : isLive(event) && [6, 7, 41, 42].includes(event.status?.code);
       const record = telemetry[endpoint];
       const longIdleEventPoll = endpoint === 'event' && event?.status?.type === 'notstarted'
@@ -512,9 +620,15 @@ function updateFeedHealth(now = Date.now()) {
         const request = record.requestKind === 'failed'
           ? `${record.errorClass || 'hata'}${record.httpStatus ? ` ${record.httpStatus}` : ''}`
           : `${record.kind || 'yanıt'}`;
-        const integrity = record.frozen ? ' · değişmeyen veri' : '';
+        const integrity = record.frozen ? ' · eski veri'
+          : record.unchangedConcern ? ' · içerik sabit, yanıtlar sürüyor' : '';
         chip.textContent = `${ENDPOINT_LABELS[endpoint]} · ${request} · yanıt ${ageText(receivedAge)}${integrity}`;
         chip.title = [
+          `Queue wait: ${Number.isFinite(record.queueWaitMs) ? `${record.queueWaitMs} ms` : 'unknown'}`,
+          `Validation: ${Number.isFinite(record.validationLatencyMs) ? `${record.validationLatencyMs} ms` : 'pending'}`,
+          `Commit: ${Number.isFinite(record.commitLatencyMs) ? `${record.commitLatencyMs} ms` : 'not committed'}`,
+          `Analysis: ${Number.isFinite(record.receiveToAnalysisMs) ? `${record.receiveToAnalysisMs} ms` : 'pending'}`,
+          `Visible: ${Number.isFinite(record.receiveToVisibleMs) ? `${record.receiveToVisibleMs} ms` : 'pending'}`,
           `İstek gecikmesi: ${Number.isFinite(record.latencyMs) ? `${record.latencyMs} ms` : 'bilinmiyor'}`,
           `Son içerik değişimi: ${ageText(changeAge)}`,
           `Sağlayıcı zaman damgası yaşı: ${sourceAge == null ? 'paylaşılmıyor' : ageText(sourceAge)}`,

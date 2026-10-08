@@ -5,48 +5,56 @@ const assert = require('node:assert/strict');
 const OddsEngine = require('../src/js/odds-engine.js');
 
 function oddsFixture(updatedAt = Date.now(), overrides = {}) {
-  return {
-    markets: [
+  const markets = [
       {
+        id: 'match-total-market', providerId: 'fixture-book', providerName: 'Fixture Book', eventId: 'fixture-event', isLive: true,
         marketName: 'Total Goals Over/Under', updatedAt,
         choices: [
-          { name: 'Over 2.5', decimalValue: 1.8 },
-          { name: 'Under 2.5', decimalValue: 2.1 },
+          { id: 'over-2.5', name: 'Over 2.5', decimalValue: 1.8 },
+          { id: 'under-2.5', name: 'Under 2.5', decimalValue: 2.1 },
         ],
       },
       {
+        id: 'half-total-market', providerId: 'fixture-book', providerName: 'Fixture Book', eventId: 'fixture-event', isLive: true,
         marketName: '1st Half Goals Over/Under', updatedAt,
         choices: [
-          { name: 'Over 1.5', decimalValue: 2.05 },
-          { name: 'Under 1.5', decimalValue: 1.72 },
+          { id: 'half-over-1.5', name: 'Over 1.5', decimalValue: 2.05 },
+          { id: 'half-under-1.5', name: 'Under 1.5', decimalValue: 1.72 },
         ],
       },
       {
+        id: 'btts-market', providerId: 'fixture-book', providerName: 'Fixture Book', eventId: 'fixture-event', isLive: true,
         marketName: 'Both Teams To Score', updatedAt,
         choices: [
-          { name: 'Yes', decimalValue: 1.91 },
-          { name: 'No', decimalValue: 1.95 },
+          { id: 'btts-yes', name: 'Yes', decimalValue: 1.91 },
+          { id: 'btts-no', name: 'No', decimalValue: 1.95 },
         ],
       },
       {
+        id: 'next-goal-market', providerId: 'fixture-book', providerName: 'Fixture Book', eventId: 'fixture-event', isLive: true,
         marketName: 'Next Team to Score', updatedAt,
         choices: [
-          { name: 'Home', decimalValue: 2.4 },
-          { name: 'No Goal', decimalValue: 3.2 },
-          { name: 'Away', decimalValue: 2.8 },
+          { id: 'next-home', name: 'Home', decimalValue: 2.4 },
+          { id: 'next-none', name: 'No Goal', decimalValue: 3.2 },
+          { id: 'next-away', name: 'Away', decimalValue: 2.8 },
         ],
       },
       {
+        id: 'rest-result-market', providerId: 'fixture-book', providerName: 'Fixture Book', eventId: 'fixture-event', isLive: true,
         marketName: 'Rest of Match Result', updatedAt,
         choices: [
-          { name: 'Home', decimalValue: 2.2 },
-          { name: 'Draw', decimalValue: 2.7 },
-          { name: 'Away', decimalValue: 3.1 },
+          { id: 'rest-home', name: 'Home', decimalValue: 2.2 },
+          { id: 'rest-draw', name: 'Draw', decimalValue: 2.7 },
+          { id: 'rest-away', name: 'Away', decimalValue: 3.1 },
         ],
       },
-      ...((overrides.markets) || []),
-    ],
-  };
+    ];
+  for (const override of overrides.markets || []) {
+    const index = markets.findIndex((market) => market.marketName === override.marketName);
+    if (index >= 0) markets[index] = { ...markets[index], ...override };
+    else markets.push(override);
+  }
+  return { markets };
 }
 
 test('parses supported live markets and removes the two-way/three-way overround', () => {
@@ -144,7 +152,7 @@ test('market movement is measured only when the provider advances its timestamp'
   const changed = oddsFixture(secondAt, {
     markets: [{
       marketName: 'Total Goals Over/Under', updatedAt: secondAt,
-      choices: [{ name: 'Over 2.5', decimalValue: 1.65 }, { name: 'Under 2.5', decimalValue: 2.25 }],
+      choices: [{ id: 'over-2.5', name: 'Over 2.5', decimalValue: 1.65 }, { id: 'under-2.5', name: 'Under 2.5', decimalValue: 2.25 }],
     }],
   });
   const second = OddsEngine.withMovement(

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, net, shell } = require('electron');
 const path = require('path');
+const { fetchJson } = require('./api-request.js');
 
 const API_BASE = 'https://www.sofascore.com/api/v1/';
 const REPO = 'durmazeren/mactakip';
@@ -47,12 +48,9 @@ function createWindow() {
 // istemcileri (curl, node fetch) 403 alıyor, Electron'un net modülü almıyor.
 ipcMain.handle('sofa:get', async (_e, apiPath) => {
   if (typeof apiPath !== 'string' || apiPath.includes('..')) throw new Error('Geçersiz yol');
-  const res = await net.fetch(API_BASE + apiPath.replace(/^\/+/, ''), {
+  return fetchJson((url, options) => net.fetch(url, options), API_BASE + apiPath.replace(/^\/+/, ''), {
     headers: { Accept: 'application/json', Referer: 'https://www.sofascore.com/' },
   });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`Sofascore ${res.status}`);
-  return res.json();
 });
 
 /* ---------- Güncelleme (isteğe bağlı) ----------

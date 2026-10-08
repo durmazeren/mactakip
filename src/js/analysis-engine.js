@@ -14,6 +14,7 @@
   const BTTS_NO_DIRECTION_THRESHOLD = 0.70;
   const MARKET_DATA_QUALITY_GATE = 65;
   const SIGNAL_TTL_MS = 15_000;
+  const MIN_CALIBRATION_OUTCOMES = 1_000;
   const ANALYSIS_TYPES = [
     'total-goals', 'total-corners', 'team-goal-home', 'team-goal-away',
     'team-shots-home', 'team-shots-away', 'next-goal-home', 'next-goal-away',
@@ -26,6 +27,25 @@
   function validPair(pair) {
     return Array.isArray(pair) && pair.length >= 2 && pair.every(Number.isFinite)
       ? [pair[0], pair[1]] : null;
+  }
+
+  function nonnegativePair(pair) {
+    const values = validPair(pair);
+    return values && values.every((value) => value >= 0) ? values : null;
+  }
+
+  function xgIntegrityValid(data) {
+    if (data?.statsIntegrity === false || data?.xgIntegrity === false
+      || data?.xgCorrectionDetected === true) return false;
+    for (const pair of [data?.cumulativeXg, data?.cumulativeStats?.xg,
+      data?.changes?.xg, data?.weightedXgRate]) {
+      if (pair != null && !nonnegativePair(pair)) return false;
+    }
+    for (const window of Array.isArray(data?.xgWindows) ? data.xgWindows : []) {
+      if (window?.rate != null && !nonnegativePair(window.rate)) return false;
+      if (window?.delta != null && !nonnegativePair(window.delta)) return false;
+    }
+    return true;
   }
 
   function total(pair) {
@@ -51,10 +71,12 @@
     const ratios = [];
     let activeWeight = 0;
     for (const feature of features) {
-      const recent = validPair(data?.changes?.[feature.key]);
+      const recent = feature.key === 'xg'
+        ? (xgIntegrityValid(data) ? nonnegativePair(data?.changes?.xg) : null)
+        : nonnegativePair(data?.changes?.[feature.key]);
       const cumulative = validPair(data?.cumulativeStats?.[feature.key]
         || (feature.key === 'xg' ? data?.cumulativeXg : null));
-      if (!recent || !cumulative) continue;
+      if (!recent || !nonnegativePair(cumulative)) continue;
       const recentRate = recent.reduce((sum, value) => sum + Math.max(0, value), 0) / windowMinutes;
       const baselineRate = cumulative.reduce((sum, value) => sum + Math.max(0, value), 0) / minute;
       const normalized = recentRate / Math.max(feature.scale / 18, baselineRate);
@@ -94,6 +116,14 @@
         freeze: ['suspension', 'var', 'penalty'].includes(eventType),
       };
     }
+    const immediateRedCard = validPair(data?.redCardDelta)?.some((value) => value > 0);
+    const immediateScoreChange = data?.scoreChanged === true;
+    if (immediateRedCard || immediateScoreChange) {
+      return {
+        key: 'transition', label: immediateRedCard ? 'Kirmizi kart rejim degisimi' : 'Gol sonrasi rejim degisimi',
+        event: immediateRedCard ? 'red-card' : 'goal', ratio, volatility: 0.48, quality: 0.46,
+      };
+    }
     if (!Number.isFinite(ratio)) {
       return { key: 'insufficient', label: 'Yetersiz veri', ratio: null, volatility: 0.24, quality: 0.35 };
     }
@@ -118,7 +148,8 @@
     const window = Number.isFinite(data?.elapsedMs) ? Math.min(1, Math.max(0, data.elapsedMs / 300_000)) : 0;
     const stats = data?.changes || {};
     const requiredCoverage = ['shots', 'sot', 'corners'].filter((key) => validPair(stats[key])).length / 3;
-    const hasXg = !!(validPair(stats.xg) && validPair(data?.cumulativeXg));
+    const hasXg = xgIntegrityValid(data)
+      && !!(nonnegativePair(stats.xg) && nonnegativePair(data?.cumulativeXg));
     const clock = data?.clock?.known === true;
     const scoreKnown = !!validPair(data?.score);
     const sampleCoverage = Number.isFinite(data?.sampleCount) ? Math.min(1, data.sampleCount / 12) : 0.75;
@@ -147,7 +178,7 @@
     const hasClock = data?.clock?.known === true;
     const hasScore = !!validPair(data?.score);
     const stats = data?.changes || {};
-    const hasXg = !!(validPair(stats.xg) && validPair(data?.cumulativeXg));
+    const hasXg = xgIntegrityValid(data) && !!(nonnegativePair(stats.xg) && nonnegativePair(data?.cumulativeXg));
     const hasShots = !!validPair(stats.shots);
     const hasSot = !!validPair(stats.sot);
     const hasBigChances = !!validPair(stats.bigChances);
@@ -177,6 +208,7 @@
     }
     if (integrity === 0 || (Number.isFinite(sourceAge) && sourceAge > 20_000)
       || (Number.isFinite(eventSourceAge) && eventSourceAge > 15_000)) return 0;
+    if (['total-goals', 'btts', 'remaining-result'].includes(market) && !hasXg) return 0;
     return Math.round(bounded(score * integrity * unchangedPenalty, 0, 100));
   }
 
@@ -192,12 +224,61 @@
     return Math.min(0.98, base + qualityPenalty + regimePenalty);
   }
 
+  function calibrationBaseModelId(market) {
+    return ({
+      'next-goal': 'live-xg-hazard-v1',
+      'total-goals': 'live-xg-poisson-total-v1',
+      btts: 'live-xg-poisson-btts-v1',
+      'remaining-result': 'live-xg-state-result-v1',
+    })[market] || null;
+  }
+
+  function calibrateProbability(data, candidate, now = Date.now()) {
+    const calibration = data?.calibration;
+    const market = candidate?.marketIdentity || {};
+    const scope = calibration || {};
+    const expectedBaseModelId = calibrationBaseModelId(market.market);
+    const rawProbability = candidate?.modelProbability;
+    const valid = calibration?.status === 'validated'
+      && !!expectedBaseModelId
+      && calibration?.baseModelId === expectedBaseModelId
+      && typeof calibration.modelId === 'string' && calibration.modelId.length > 0
+      && typeof calibration.version === 'string' && calibration.version.length > 0
+      && calibration?.method === 'platt'
+      && Number.isFinite(calibration.slope) && calibration.slope > 0
+      && Number.isFinite(calibration.intercept)
+      && Number.isInteger(calibration.outcomeCount) && calibration.outcomeCount >= MIN_CALIBRATION_OUTCOMES
+      && Number.isFinite(calibration.brierScore) && calibration.brierScore >= 0 && calibration.brierScore <= 0.30
+      && Number.isFinite(calibration.validatedAt) && calibration.validatedAt <= now
+      && Number.isFinite(calibration.expiresAt) && calibration.expiresAt > now
+      && scope.market === market.market
+      && scope.period === market.period
+      && String(scope.line ?? '') === String(market.line ?? '')
+      && Number.isFinite(rawProbability) && rawProbability > 0 && rawProbability < 1;
+    if (!valid) return null;
+    const logit = Math.log(rawProbability / (1 - rawProbability));
+    const calibrated = 1 / (1 + Math.exp(-(calibration.slope * logit + calibration.intercept)));
+    if (!Number.isFinite(calibrated) || calibrated <= 0 || calibrated >= 1) return null;
+    return {
+      probability: calibrated,
+      calibration: {
+        status: 'validated', baseModelId: calibration.baseModelId,
+        modelId: calibration.modelId, version: calibration.version,
+        method: calibration.method, slope: calibration.slope, intercept: calibration.intercept,
+        outcomeCount: calibration.outcomeCount,
+        brierScore: calibration.brierScore, validatedAt: calibration.validatedAt,
+        expiresAt: calibration.expiresAt, market: scope.market, period: scope.period, line: scope.line ?? null,
+      },
+    };
+  }
+
   function bounded(value, min = 0, max = 1) {
     return Math.max(min, Math.min(max, value));
   }
 
   function blendedXgRate(data) {
-    const cumulative = validPair(data?.cumulativeXg);
+    if (!xgIntegrityValid(data)) return null;
+    const cumulative = nonnegativePair(data?.cumulativeXg);
     const minute = Number(data?.minute);
     const baseline = cumulative && Number.isFinite(minute) && minute > 0
       ? cumulative.map((value) => Math.max(0, value / minute)) : null;
@@ -206,12 +287,18 @@
     const out = [0, 1].map((side) => {
       let weighted = 0;
       let weightTotal = 0;
-      for (const window of windows) {
+    const selectedWindows = new Set();
+    for (const window of windows) {
         const requested = Number(window?.requestedMinutes);
-        const rate = validPair(window?.rate);
-        if (!rate || !weights[requested]) continue;
+        const rate = nonnegativePair(window?.rate);
+        const delta = window?.delta == null ? null : nonnegativePair(window.delta);
+        if (!rate || !weights[requested] || selectedWindows.has(requested)) continue;
         const duration = Number(window.elapsedMinutes);
         const samples = Number(window.sampleCount);
+        if (!Number.isFinite(duration) || duration <= 0 || duration > requested * 1.5
+          || !Number.isInteger(samples) || samples < 2 || (window.delta != null && !delta)) continue;
+        if (delta && rate.some((value, side) => Math.abs(value - delta[side] / duration) > 0.015)) continue;
+        selectedWindows.add(requested);
         const temporalCoverage = bounded(duration / (requested * 0.70), 0, 1);
         const sampleCoverage = bounded((samples - 1) / 5, 0, 1);
         const evidence = temporalCoverage * (0.35 + 0.65 * sampleCoverage);
@@ -223,11 +310,11 @@
         weightTotal += weights[requested];
       }
       const anchor = baseline?.[side];
-      const ewma = validPair(data?.weightedXgRate)?.[side];
+      const ewma = nonnegativePair(data?.weightedXgRate)?.[side];
       if (!weightTotal) {
         if (Number.isFinite(ewma)) return ewma;
-        const recent = validPair(data?.changes?.xg);
-        const elapsed = Math.max(3, (data?.elapsedMs || 0) / 60_000);
+        const recent = nonnegativePair(data?.changes?.xg);
+        const elapsed = Math.max(0.1, (data?.elapsedMs || 0) / 60_000);
         return recent ? Math.max(0, recent[side] / elapsed) : anchor;
       }
       const multiWindow = weighted / weightTotal;
@@ -239,13 +326,20 @@
     return out.every(Number.isFinite) ? out : null;
   }
 
-  function gameStateMultiplier(score, side, minute) {
+  function gameStateMultiplier(score, side, minute, matchEndMinute = 90) {
     if (!validPair(score)) return 1;
     const difference = score[side] - score[1 - side];
-    const urgency = bounded((minute - 48) / 42, 0, 1);
+    const currentMinute = Number.isFinite(minute) ? bounded(minute, 0, 130) : 0;
+    const endMinute = Number.isFinite(matchEndMinute) ? Math.max(currentMinute, matchEndMinute) : 90;
+    const remaining = Math.max(0, endMinute - currentMinute);
+    const urgency = bounded((currentMinute - 50) / Math.max(12, endMinute - 50), 0, 1);
     const margin = Math.min(3, Math.abs(difference));
-    if (difference < 0) return 1 + urgency * (0.14 + 0.06 * margin);
-    if (difference > 0) return Math.max(0.68, 1 - urgency * (0.10 + 0.045 * margin));
+    if (difference < 0) return bounded(1 + urgency * (0.12 + 0.055 * margin), 1, 1.32);
+    if (difference > 0) {
+      const protect = urgency * (0.08 + 0.045 * margin) * bounded(remaining / 18, 0.25, 1);
+      return bounded(1 - protect, 0.68, 1);
+    }
+    // Competition format and whether a draw is useful are not available from the feed.
     return 1 + urgency * 0.035;
   }
 
@@ -265,8 +359,9 @@
         return 0.48 * bounded(remainingMinutes / 35, 0.20, 1);
       }
       return knownRecords.reduce((sum, record) => {
-        const age = Number.isFinite(record.ageMinutes) ? Math.max(0, record.ageMinutes) : 0;
         const minute = Number.isFinite(record.minute) ? record.minute : data.minute;
+        const age = Number.isFinite(record.ageMinutes) ? Math.max(0, record.ageMinutes)
+          : Number.isFinite(data.minute) && Number.isFinite(minute) ? Math.max(0, data.minute - minute) : 0;
         const matchEndMinute = Number.isFinite(data.clock?.matchEndMinute)
           ? data.clock.matchEndMinute : data.minute + remainingMinutes;
         const timeRemainingFactor = bounded((matchEndMinute - minute) / 50, 0.18, 1);
@@ -282,9 +377,11 @@
   }
 
   function nextGoalProbabilities(data, horizonMinutes = 8) {
+    horizonMinutes = bounded(Number.isFinite(horizonMinutes) ? horizonMinutes : 8, 1, 20);
+    if (!xgIntegrityValid(data)) return null;
     const rates = blendedXgRate(data)
-      || validPair(data?.weightedXgRate)
-      || (validPair(data?.changes?.xg)
+      || nonnegativePair(data?.weightedXgRate)
+      || (nonnegativePair(data?.changes?.xg)
         ? data.changes.xg.map((value) => value / Math.max(3, (data.elapsedMs || 0) / 60_000))
         : null);
     if (!rates) return null;
@@ -294,14 +391,22 @@
     const redCards = validPair(data?.redCards);
     const score = validPair(data?.score);
     const remaining = Math.max(1, (data?.clock?.matchEndMinute || 90) - (data?.minute || 0));
+    const windowMinutes = Math.max(1, (data?.elapsedMs || 0) / 60_000);
     const hazards = rates.map((rate, side) => {
       const cardMultiplier = redCardMultiplier(data, side, remaining);
-      const gameState = gameStateMultiplier(score, side, data?.minute || 0);
-      const pressureSupport = Math.max(0, shots[side]) * 0.0015
-        + Math.max(0, sot[side]) * 0.008 + Math.max(0, bigChances[side]) * 0.02;
-      return bounded((Math.max(0, rate) + pressureSupport) * cardMultiplier * gameState, 0.001, 0.35);
+      const gameState = gameStateMultiplier(score, side, data?.minute || 0, data?.clock?.matchEndMinute);
+      // Convert count observations to a rate before mixing them with xG/min.
+      const pressureSupport = (Math.max(0, shots[side]) * 0.0015
+        + Math.max(0, sot[side]) * 0.008 + Math.max(0, bigChances[side]) * 0.02) / windowMinutes;
+      return bounded((Math.max(0, rate) + pressureSupport) * cardMultiplier * gameState, 0, 0.35);
     });
     const total = hazards[0] + hazards[1];
+    if (total <= 0) return {
+      home: 0, away: 0, none: 1,
+      calibrationStatus: 'heuristic-uncalibrated',
+      probabilityKind: 'heuristic-uncalibrated hazard; not historically calibrated',
+      horizonMinutes, hazardsPerMinute: hazards,
+    };
     const goalWithinWindow = 1 - Math.exp(-total * horizonMinutes);
     return {
       home: goalWithinWindow * hazards[0] / total,
@@ -309,7 +414,7 @@
       none: 1 - goalWithinWindow,
       calibrationStatus: 'heuristic-uncalibrated',
       probabilityKind: 'heuristic-uncalibrated hazard; not historically calibrated',
-      horizonMinutes: Math.max(1, Math.min(20, horizonMinutes)),
+      horizonMinutes,
       hazardsPerMinute: hazards,
     };
   }
@@ -322,10 +427,10 @@
     const bigChances = data.changes.bigChances?.[side];
     if (![shots, sot, xg, corners, bigChances].some(Number.isFinite)) return null;
     const scale = fiveMinuteScale(data);
-    return ((Number.isFinite(shots) ? shots * 0.4 : 0)
-      + (Number.isFinite(sot) ? sot * 1.7 : 0)
-      + (Number.isFinite(xg) ? xg * 5 : 0)
-      + (Number.isFinite(corners) ? corners * 0.25 : 0)
+    return ((Number.isFinite(shots) ? Math.max(0, shots) * 0.4 : 0)
+      + (Number.isFinite(sot) ? Math.max(0, sot) * 1.7 : 0)
+      + (Number.isFinite(xg) ? Math.max(0, xg) * 5 : 0)
+      + (Number.isFinite(corners) ? Math.max(0, corners) * 0.25 : 0)
       + (Number.isFinite(bigChances) ? Math.min(3, bigChances) : 0)) * scale;
   }
 
@@ -340,11 +445,12 @@
   }
 
   function remainingXg(data, endMinute) {
-    const current = validPair(data.cumulativeXg);
+    if (!xgIntegrityValid(data)) return null;
+    const current = nonnegativePair(data.cumulativeXg);
     if (!current || !Number.isFinite(data.minute) || !Number.isFinite(endMinute)
       || data.minute < 10 || data.minute >= endMinute || data.elapsedMs < 180_000) return null;
-    const recent = validPair(data.changes.xg);
-    const weighted = validPair(data.weightedXgRate);
+    const recent = nonnegativePair(data.changes.xg);
+    const weighted = nonnegativePair(data.weightedXgRate);
     const played = Math.max(10, data.minute);
     const windowMinutes = Math.max(3, data.elapsedMs / 60_000);
     const left = Math.max(0, endMinute - data.minute);
@@ -367,7 +473,7 @@
         remaining = sampleAdjustedRate * left;
       }
       remaining *= redCardMultiplier(data, side, left);
-      remaining *= gameStateMultiplier(validPair(data.score), side, data.minute);
+      remaining *= gameStateMultiplier(validPair(data.score), side, data.minute, data.clock?.matchEndMinute);
       return remaining;
     });
   }
@@ -682,7 +788,7 @@
   }
 
   function makeAnalysisCandidates(data, lines = { matchTotal: 2.5, firstHalfTotal: 1.5 }) {
-    if (data.status !== 'ready') return [];
+    if (data.status !== 'ready' || data.frozen === true || eventRegime(data).freeze === true) return [];
     const {
       changes, minute, names, totalShots, totalSot, totalCorners, totalXg, totalBigChances,
     } = data;
@@ -791,15 +897,29 @@
       candidate.regime = regime.key;
       candidate.valueEligible = false;
       if (candidate.group === 'market' && candidate.marketIdentity && Number.isFinite(candidate.modelProbability)) {
+        const calibrated = calibrateProbability(data, candidate, data.analysisNowMs ?? Date.now());
+        candidate.heuristicProbability = candidate.modelProbability;
+        candidate.calibratedProbability = calibrated?.probability ?? null;
+        candidate.calibrationStatus = calibrated ? 'validated-market-specific' : 'not-calibrated';
+        // modelProbability remains the raw heuristic shown by this candidate. A separately
+        // validated probability is used only inside odds assessment for value eligibility.
+        candidate.probabilityKind = 'heuristic-uncalibrated; no historical calibration';
         const assessment = oddsEngine?.marketAssessment(
           data.liveOdds, candidate.key, candidate.modelProbability,
           data.analysisNowMs, data.eventIdentity,
-          { volatile: regime.volatility >= 0.40 || regime.freeze },
+          {
+            volatile: regime.volatility >= 0.40 || regime.freeze,
+            ...(calibrated ? {
+              baseModelId: calibrated.calibration.baseModelId,
+              modelCalibration: { ...calibrated.calibration, probability: calibrated.probability },
+            } : {}),
+          },
         );
         if (assessment?.verified) {
           candidate.oddsEvidence = assessment;
           candidate.marketPriceState = assessment.freshnessBand === 'LIVE' ? 'OPEN' : 'AGING';
-          candidate.valueEligible = marketQuality >= 75
+          candidate.theoreticalValueCandidate = assessment.theoreticalValueCandidate === true;
+          candidate.valueEligible = !!calibrated && marketQuality >= 75
             && assessment.valueEligible === true
             && assessment.freshnessBand === 'LIVE'
             && assessment.oddsAgeMs <= 5_000
@@ -807,14 +927,16 @@
             && assessment.eventIdentityVerified === true
             && assessment.edge >= Math.max(0.03, (100 - marketQuality) * 0.0005)
             && assessment.expectedValue >= 0.02;
+          candidate.valueStatus = candidate.valueEligible ? 'CALIBRATED_CANDIDATE'
+            : calibrated ? 'CALIBRATED_BUT_FILTERED' : 'UNCALIBRATED_THEORETICAL_ONLY';
         } else {
-          candidate.marketPriceState = ['market-closed', 'market-disappeared', 'market-unavailable'].includes(assessment?.reason)
+          candidate.marketPriceState = ['market-closed', 'market-disappeared'].includes(assessment?.reason)
             ? 'MARKET_CLOSED'
             : ['stale-price', 'source-timestamp-missing', 'future-timestamp'].includes(assessment?.reason) ? 'STALE'
             : assessment?.reason === 'event-mismatch' ? 'EVENT_MISMATCH'
               : ['market-identity-mismatch', 'market-incomplete', 'selection-unavailable'].includes(assessment?.reason)
                 ? 'LINE_MISMATCH'
-                : data.liveOdds ? 'NO_MATCH' : 'MARKET_CLOSED';
+                : 'PRICE_UNAVAILABLE';
         }
       }
       const edgeRank = Number.isFinite(candidate.oddsEvidence?.edge)
@@ -908,6 +1030,7 @@
     ANALYSIS_TYPES, makeAnalysisCandidates, remainingXg, remainingXgScenarios,
     scenarioBand, poissonOutcomes, eventRegime, dataQualityScore, dynamicThreshold,
     marketDataQuality, dynamicMarketThreshold, nextGoalProbabilities, blendedXgRate,
+    calibrateProbability, xgIntegrityValid, gameStateMultiplier,
     advanceSignalLifecycle, activeLifecycleSignals, pendingLifecycleSignals, MARKET_DATA_QUALITY_GATE,
   };
 }));

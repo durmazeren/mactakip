@@ -348,6 +348,7 @@ function recordLiveOddsSnapshot(id, payload, event, now = Date.now()) {
   const snapshot = OddsEngine.parseSnapshot(payload, {
     eventLive: true, observedAt: now,
     eventIdentity: LiveAnalysisState.matchIdentity(event, id),
+    event,
   });
   if (!snapshot) return false;
   state.liveOdds.set(id, OddsEngine.withMovement(snapshot, state.liveOdds.get(id)));

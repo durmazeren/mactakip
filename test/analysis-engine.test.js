@@ -180,7 +180,10 @@ test('fresh live odds add fair-price, edge, and EV evidence without erasing mode
   assert.ok(opposed, 'the model direction remains visible alongside opposing market evidence');
   assert.ok(opposed.oddsEvidence.edge > 0, 'the model-market disagreement is exposed as a positive edge');
   assert.ok(opposed.oddsEvidence.expectedValue > 0);
-  assert.equal(opposed.valueEligible, true);
+  assert.equal(opposed.valueEligible, false, 'heuristic probability cannot produce an actionable value candidate');
+  assert.equal(opposed.valueStatus, 'UNCALIBRATED_THEORETICAL_ONLY');
+  assert.equal(opposed.calibrationStatus, 'not-calibrated');
+  assert.equal(opposed.theoreticalValueCandidate, true, 'uncalibrated edge remains a diagnostic only');
 });
 
 test('recent big chances add pressure and red cards adjust remaining xG by team', () => {

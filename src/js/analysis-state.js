@@ -144,12 +144,18 @@
   }
 
   function matchIdentity(event, fallbackId) {
-    const identityPart = (item) => item?.id ?? item?.name ?? '';
-    return [
-      event?.id ?? fallbackId,
-      identityPart(event?.homeTeam), identityPart(event?.awayTeam),
-      identityPart(event?.tournament), event?.startTimestamp ?? '',
-    ].join('|');
+    const identityPart = (item) => {
+      if (item?.id != null && String(item.id).trim()) return { providerId: String(item.id) };
+      const fallbackName = String(item?.name || '').trim().normalize('NFKC').toLocaleLowerCase('en');
+      return fallbackName ? { fallbackName } : null;
+    };
+    return JSON.stringify({
+      providerEventId: event?.id != null ? String(event.id) : String(fallbackId ?? ''),
+      homeTeam: identityPart(event?.homeTeam),
+      awayTeam: identityPart(event?.awayTeam),
+      tournament: identityPart(event?.tournament || event?.uniqueTournament),
+      startTimestamp: Number.isFinite(event?.startTimestamp) ? event.startTimestamp : null,
+    });
   }
 
   function validPair(pair) {

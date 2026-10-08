@@ -14,6 +14,7 @@
     "test": "node --test",
     "simulate:analysis": "node scripts/replay-analysis.js",
     "backtest:analysis": "node scripts/backtest-analysis.js",
+    "smoke:live-feed": "electron scripts/live-feed-smoke.js",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist": "electron-builder --mac --win --publish never"
