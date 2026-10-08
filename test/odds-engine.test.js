@@ -157,11 +157,14 @@ test('market movement is measured only when the provider advances its timestamp'
   assert.equal(noChange.markets.matchTotals['2.5'].movement, null);
 });
 
-test('the odds scraper is polled on a separate live-match cadence', () => {
+test('the odds scraper is scheduled independently per match by the feed scheduler', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const app = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
-  const analysis = fs.readFileSync(path.join(__dirname, '../src/js/analysis.js'), 'utf8');
+  const core = fs.readFileSync(path.join(__dirname, '../src/js/core.js'), 'utf8');
   assert.match(app, /event\/\$\{id\}\/odds\/1\/all/);
-  assert.match(analysis, /LIVE_ODDS_POLL_MS = 30_000/);
+  assert.match(app, /endpointNamesDue\(id/);
+  assert.match(app, /scheduleEndpoint\(id, 'odds'/);
+  assert.match(core, /odds: Object\.freeze\(\{ base:/);
+  assert.doesNotMatch(app, /setInterval\(pollOne/);
 });

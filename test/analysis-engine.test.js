@@ -161,8 +161,9 @@ test('fresh live odds add fair-price, edge, and EV evidence without erasing mode
   const now = Date.now();
   const makeOdds = (over, under) => OddsEngine.parseSnapshot({
     markets: [{
-      marketName: 'Total Goals Over/Under 2.5', updatedAt: now,
-      choices: [{ name: 'Over 2.5', decimalValue: over }, { name: 'Under 2.5', decimalValue: under }],
+      marketId: 'total-goals-2.5', bookmakerId: 'bookmaker-test', eventId: 'event-test',
+      isLive: true, marketName: 'Total Goals Over/Under 2.5', updatedAt: now,
+      choices: [{ id: 'over-2.5', name: 'Over 2.5', decimalValue: over }, { id: 'under-2.5', name: 'Under 2.5', decimalValue: under }],
     }],
   }, { eventLive: true, observedAt: now });
 

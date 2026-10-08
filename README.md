@@ -29,7 +29,7 @@ Tek gereksinim **Node.js** (LTS sürümü). Windows'ta yoksa `Baslat-Windows.bat
 - **Windows:** SmartScreen "Windows bilgisayarınızı korudu" derse: "Ek bilgi" → "Yine de çalıştır".
 - **Mac:** İnternetten indirilen `.command` ilk açılışta engellenirse: sağ tık → Aç. Çalıştırılamıyor derse Terminal'de bir kez `chmod +x Baslat-Mac.command`.
 
-Komut satırından: `npm install` ve ardından `npm start`. Analiz motoru testleri için `npm test`; sentetik canlı snapshot akışını tekrar oynatmak için `npm run simulate:analysis`.
+Komut satırından: `npm install` ve ardından `npm start`. Analiz motoru testleri için `npm test`; sentetik canlı snapshot akışını tekrar oynatmak için `npm run simulate:analysis`; etiketli tarihsel örnekleri değerlendirmek için `npm run backtest:analysis -- ./dataset.json`. Veri biçimi ve kalibrasyon ayrıntıları için [canlı analiz backtest kılavuzuna](LIVE_ANALYSIS_BACKTEST.md) bakın.
 
 ## Kurulum dosyası (Node.js'siz bilgisayarlar)
 

@@ -462,3 +462,22 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .analysis-state.stale b { color: var(--alert); }
 .analysis-state.nodata b { color: var(--neutral); }
 .analysis-empty { padding: 28px 16px; color: var(--muted); font-size: 12px; text-align: center; }
+
+/* Per-match endpoint health is kept separate from signal cards. */
+.feed-health { flex: none; max-height: 150px; overflow: auto; border-bottom: 1px solid var(--line-soft); background: rgba(0, 0, 0, .12); }
+.feed-health:empty { display: none; }
+.feed-health-panel { margin: 0; }
+.feed-health-heading { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); background: var(--s1); font-size: 9px; font-weight: 800; }
+.feed-health-heading span { color: var(--muted); font-weight: 600; }
+.feed-health-match { display: grid; grid-template-columns: minmax(72px, 1fr) repeat(3, auto); align-items: center; gap: 5px; padding: 5px 10px; border-bottom: 1px solid rgba(255, 255, 255, .035); }
+.feed-health-match:last-child { border-bottom: 0; }
+.feed-health-team { overflow: hidden; color: var(--text-2); font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.feed-health-source { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border: 1px solid var(--line-soft); border-radius: 5px; color: var(--muted); background: rgba(255, 255, 255, .025); font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.feed-health-source::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ''; }
+.feed-health-source[data-state="fresh"], .feed-health-source[data-state="live"] { color: var(--success); border-color: rgba(57, 181, 122, .2); }
+.feed-health-source[data-state="aging"], .feed-health-source[data-state="backoff"] { color: var(--alert); border-color: rgba(219, 170, 63, .22); }
+.feed-health-source[data-state="stale"], .feed-health-source[data-state="failed"], .feed-health-source[data-state="rate-limited"] { color: var(--error); border-color: rgba(219, 89, 63, .24); }
+.feed-health-source[data-state="frozen"] { color: var(--error); border-color: rgba(219, 89, 63, .24); background: var(--error-hl); }
+.feed-health-source[data-state="unchanged"] { color: var(--text-2); }
+.feed-health-source[data-state="skipped"], .feed-health-source[data-state="unknown"] { color: var(--muted); }
+.analysis-live-indicator i { background: var(--primary); box-shadow: 0 0 0 3px var(--primary-hl); }
