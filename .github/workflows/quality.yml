@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, live-analysis-improvements]
 
 permissions:
   contents: read
