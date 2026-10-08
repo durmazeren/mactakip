@@ -49,6 +49,7 @@ function teamValue(t) {
   if (!pair) return null;
   if (t.side === 'home') return pair[0];
   if (t.side === 'away') return pair[1];
+  if (!Number.isFinite(pair[0]) || !Number.isFinite(pair[1])) return null;
   return pair[0] + pair[1];
 }
 

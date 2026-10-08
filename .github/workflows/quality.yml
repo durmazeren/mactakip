@@ -1,0 +1,45 @@
+name: Live analysis quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, live-analysis-improvements]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-analysis-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-tests:
+    name: Node tests and replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Replay synthetic live frames
+        run: npm run simulate:analysis
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          for file in src/main.js src/app.js src/js/analysis.js src/js/analysis-engine.js src/js/analysis-state.js src/js/core.js src/js/odds-engine.js src/js/live-feed-diagnostic.js src/api-request.js scripts/live-feed-smoke.js; do
+            node --check "$file"
+          done

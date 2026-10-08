@@ -32,7 +32,7 @@
       </div>
       <span id="status" class="status"></span>
       <button id="fsBtn" class="icon-btn fs-btn" title="Tam ekran (F)">⛶</button>
-      <button id="toggleSide" class="btn btn-sm" title="Şut ekranını aç/kapat">Şut ekranı</button>
+      <button id="toggleSide" class="btn btn-sm" title="Şut ve canlı analiz panelini aç/kapat">Takip paneli</button>
     </div>
   </header>
 
@@ -50,9 +50,12 @@
 
     <aside id="side" class="side">
       <div class="side-head">
-        <h3>Şut ekranı</h3>
-        <button id="addShot" class="btn btn-sm" title="Sadece şut ekranına maç ekle">+ Maç ekle</button>
-        <div class="seg" id="periodSeg">
+        <div class="side-tabs" role="tablist" aria-label="Takip görünümü">
+          <button id="shotsTab" class="side-tab on" role="tab" aria-selected="true">Şutlar</button>
+          <button id="analysisTab" class="side-tab" role="tab" aria-selected="false">Canlı analiz</button>
+        </div>
+        <button id="addShot" class="btn btn-sm" title="Sadece takip paneline maç ekle">+ Maç</button>
+        <div class="seg" id="periodSeg" aria-label="İstatistik periyodu">
           <button data-period="ALL" class="on">Maç</button>
           <button data-period="1ST">1Y</button>
           <button data-period="2ND">2Y</button>
@@ -62,9 +65,41 @@
           <div id="cardCfg" class="popover" hidden><div class="pop-title">Kartta göster</div></div>
         </div>
       </div>
-      <div id="couponBar" class="coupon-bar" hidden></div>
-      <div id="shotList" class="shot-list"></div>
-      <div class="side-foot"><span>Her 10 sn'de güncellenir</span><span id="appVersion"></span></div>
+      <div id="shotsView" class="side-view">
+        <div id="couponBar" class="coupon-bar" hidden></div>
+        <div id="shotList" class="shot-list"></div>
+      </div>
+      <div id="analysisView" class="side-view" hidden>
+        <div class="analysis-intro">
+          <div class="analysis-heading">
+            <div><b>Canlı sinyal merkezi</b><span>Son ölçüm · kayan 5 dk pencere</span></div>
+            <span class="analysis-live-indicator"><i></i>Canlı kaynaklar</span>
+          </div>
+          <div class="market-legend" aria-label="Analiz edilen market aileleri">
+            <span>Sıradaki gol</span><span>İY alt/üst</span><span>İY KG</span><span>KG</span>
+            <span>Maç alt/üst</span><span>Takım gol temposu</span><span>Kalan oyun sonucu</span>
+            <span>Toplam korner</span><span>Takım şutu</span>
+          </div>
+          <div class="analysis-line-controls">
+            <label>Maç gol çizgisi
+              <select id="analysisMatchLine">
+                <option value="0.5">0.5</option><option value="1.5">1.5</option><option value="2.5">2.5</option>
+                <option value="3.5">3.5</option><option value="4.5">4.5</option>
+              </select>
+            </label>
+            <label>İY gol çizgisi
+              <select id="analysisHalfLine">
+                <option value="0.5">0.5</option><option value="1.5">1.5</option><option value="2.5">2.5</option>
+              </select>
+            </label>
+          </div>
+          <p>Canlı fiyatlar yalnızca güncel zaman damgası ve eşleşen maç/market kimliğiyle değerlendirilir. Model güveni, edge ve EV geçmiş maçlarla kalibre edilmemiş teorik karşılaştırmalardır; sonuç olasılığı veya bahis tavsiyesi değildir. Sağlayıcı uzatma süresini paylaşmazsa projeksiyon belirsiz gösterilir.</p>
+        </div>
+        <div id="analysisSummary" class="analysis-summary" role="status" aria-live="polite"></div>
+        <div id="feedHealth" class="feed-health" aria-live="off"></div>
+        <div id="analysisList" class="analysis-list"></div>
+      </div>
+      <div class="side-foot"><span id="sideFootText">Canlı kaynak sağlığı ve veri yaşı izlenir</span><span id="appVersion"></span></div>
     </aside>
   </main>
 
@@ -111,6 +146,10 @@
   <script src="js/coupon.js"></script>
   <script src="js/shots.js"></script>
   <script src="js/alerts.js"></script>
+  <script src="js/odds-engine.js"></script>
+  <script src="js/analysis-state.js"></script>
+  <script src="js/analysis-engine.js"></script>
+  <script src="js/analysis.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

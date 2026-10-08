@@ -2,7 +2,7 @@
   "name": "mac-takip",
   "productName": "Mac Takip",
   "version": "1.3.1",
-  "description": "Sofascore canlı maç animasyonu ve şut takip paneli",
+  "description": "Sofascore canlı maç takibi, şut paneli ve açıklanabilir canlı aktivite sinyalleri",
   "private": true,
   "license": "UNLICENSED",
   "engines": {
@@ -11,6 +11,10 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test",
+    "simulate:analysis": "node scripts/replay-analysis.js",
+    "backtest:analysis": "node scripts/backtest-analysis.js",
+    "smoke:live-feed": "electron scripts/live-feed-smoke.js",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist": "electron-builder --mac --win --publish never"
