@@ -40,6 +40,7 @@ const state = {
   matches: loadMatches(),            // [{ id, anim }] — anim: false ise sadece şut ekranında
   events: new Map(),                 // id -> son event verisi
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
+  statsRaw: new Map(),               // id -> Sofascore'un tüm maç istatistikleri
   lastPoll: new Map(),               // id -> son sorgu zamanı (ms)
   tiles: new Map(),                  // id -> animasyon kutusu durumu
   period: 'ALL',

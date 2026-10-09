@@ -68,6 +68,24 @@
     </aside>
   </main>
 
+  <dialog id="statsDialog" class="stats-dialog" aria-labelledby="statsTitle">
+    <div class="stats-dialog-head">
+      <div class="stats-dialog-heading">
+        <span class="stats-dialog-kicker">MAÇ İSTATİSTİKLERİ</span>
+        <h2 id="statsTitle"></h2>
+        <span id="statsMeta" class="stats-dialog-meta"></span>
+      </div>
+      <button id="statsClose" class="icon-btn stats-dialog-close" aria-label="İstatistikleri kapat">✕</button>
+    </div>
+    <div id="statsTabs" class="stats-dialog-tabs" role="tablist" aria-label="İstatistik dönemi">
+      <button data-stats-tab="ALL" class="on" role="tab">Maç</button>
+      <button data-stats-tab="1ST" role="tab">1. yarı</button>
+      <button data-stats-tab="2ND" role="tab">2. yarı</button>
+      <button data-stats-tab="players" role="tab">Oyuncular</button>
+    </div>
+    <div id="statsBody" class="stats-dialog-body"></div>
+  </dialog>
+
   <template id="tileTpl">
     <article class="tile">
       <div class="tile-head">
@@ -119,6 +137,7 @@
   <script src="js/players.js"></script>
   <script src="js/coupon.js"></script>
   <script src="js/shots.js"></script>
+  <script src="js/stats-modal.js"></script>
   <script src="js/alerts.js"></script>
   <script src="app.js"></script>
 </body>

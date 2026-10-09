@@ -60,8 +60,9 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 
 **Şut ekranı**
 - Her maç için toplam şut, isabetli şut ve korner, her biri tek satırda; "Maç / 1Y / 2Y" ile devre bazında.
+- Karta tıkla: maçın tüm istatistikleri açılır (Maç / 1. yarı / 2. yarı sekmeleri: topla oynama, xG, şut türleri, paslar, mücadeleler, savunma, kaleci) ve **Oyuncular** sekmesinde her oyuncunun ayrıntılı istatistikleri. Esc ya da ✕ ile kapanır.
 - ⚙ ile kartta hangi istatistiklerin görüneceği seçilir (ör. korneri kapat) ve sıralama ayarlanır:
-  - **Elle:** kartı takım adlarından tutup sürükle. Sıra animasyon ızgarasına da yansır.
+  - **Elle:** kartın üstünde basılı tut ve sürükle. Sıra animasyon ızgarasına da yansır (Otomatik moddayken sürüklersen Elle'ye geçer).
   - **Otomatik:** hedefli canlı maçlar üstte, sonra canlı, başlamamış ve en altta küçülmüş halde biten maçlar.
 - Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
 - Gol olunca şut kartı birkaç saniyeliğine tam boy bir gol animasyonuna dönüşür; ardından istatistik ve hedefler kaldığı yerden görünür.

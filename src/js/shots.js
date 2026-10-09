@@ -29,6 +29,8 @@ function ensureCard(id) {
   const card = el('div', 'shot-card');
   const top = el('div', 'sc-top');
   const title = el('div', 'sc-title');
+  title.tabIndex = 0;
+  title.setAttribute('role', 'button');
   const homeN = el('span', 'home');
   const score = el('b', 'sc-score');
   const awayN = el('span', 'away');
@@ -48,8 +50,6 @@ function ensureCard(id) {
   resetBtn.title = 'Bu maçı yenile (veriyi ve animasyonu baştan yükle)';
   resetBtn.addEventListener('click', () => resetMatch(id));
   top.append(title, meta, targetBtn, resetBtn, animBtn, rm);
-  title.addEventListener('pointerdown', (e) => startCardDrag(e, id));
-
   const statsBox = el('div', 'sc-stats');
   const rows = {};
   for (const [key, label, full] of CARD_STATS) {
@@ -59,7 +59,7 @@ function ensureCard(id) {
   }
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');
-  const formHost = el('div');
+  const formHost = el('div', 'sc-form-host');
   const goalOverlay = el('div', 'goal-overlay');
   goalOverlay.setAttribute('role', 'status');
   goalOverlay.setAttribute('aria-live', 'polite');
@@ -72,6 +72,21 @@ function ensureCard(id) {
   goalOverlay.append(goalContent);
 
   card.append(top, statsBox, none, targets, formHost, el('div', 'alert-badge'), goalOverlay);
+  let lastPointerUp = 0;
+  card.addEventListener('pointerdown', (event) => {
+    if (event.target.closest('button, input, select, textarea, a, label, .targets, .sc-form-host, .goal-overlay')) return;
+    startCardDrag(event, id, () => { lastPointerUp = performance.now(); });
+  });
+  card.addEventListener('click', (event) => {
+    if (performance.now() - lastPointerUp < 500) return;
+    if (event.target.closest('button, input, select, textarea, a, label, .targets, .sc-form-host, .goal-overlay')) return;
+    openStatsModal(id);
+  });
+  title.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openStatsModal(id);
+  });
   $('#shotList').append(card);
   const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows, none, targets, formHost };
   shotCards.set(id, ref);
@@ -114,6 +129,7 @@ function updateCard(id) {
     c.el.classList.remove('live');
     c.meta.classList.remove('live');
     c.homeN.textContent = `Maç #${id}`;
+    c.title.setAttribute('aria-label', `Maç #${id} istatistiklerini aç`);
     c.awayN.textContent = '';
     c.score.textContent = '';
     c.meta.textContent = 'Yükleniyor';
@@ -127,7 +143,8 @@ function updateCard(id) {
   c.homeN.textContent = teamName(ev.homeTeam);
   c.awayN.textContent = teamName(ev.awayTeam);
   c.score.textContent = scoreText(ev);
-  c.title.title = `${ev.homeTeam?.name} – ${ev.awayTeam?.name}`;
+  c.title.title = `${ev.homeTeam?.name} – ${ev.awayTeam?.name} · Tıkla: istatistikler · Basılı tut: sırala`;
+  c.title.setAttribute('aria-label', `${ev.homeTeam?.name} – ${ev.awayTeam?.name} istatistiklerini aç`);
   c.meta.textContent = minuteText(ev);
   const live = isLive(ev);
   c.meta.classList.toggle('live', live);
@@ -150,7 +167,7 @@ function updateCard(id) {
 }
 
 /* Kart sıralaması
- * Elle: kartı başlığından (takım adlarından) tutup sürükle; sıra animasyon ızgarasına da yansır.
+ * Elle: kartta basılı tutup sürükle; sıra animasyon ızgarasına da yansır.
  * Otomatik: hedefli canlı maçlar → canlı → başlamamış → biten (bitenler küçülür). */
 function cardGroup(id) {
   const ev = state.events.get(id);
@@ -172,18 +189,31 @@ function applyCardOrder() {
   });
 }
 
-function startCardDrag(e, id) {
-  if (state.cardSort === 'auto' || e.button !== 0) return;
+function startCardDrag(e, id, onPointerUp) {
+  if (e.button !== 0) return;
   const card = shotCards.get(id)?.el;
   if (!card) return;
   e.preventDefault();
   const target = e.currentTarget;
   target.setPointerCapture(e.pointerId);
-  card.classList.add('card-dragging');
-  document.body.classList.add('card-drag');
+  const startX = e.clientX, startY = e.clientY;
+  let dragging = false;
+  let canceled = false;
   let moved = false;
+  const timer = setTimeout(() => {
+    if (canceled || !target.isConnected) return;
+    dragging = true;
+    card.classList.add('card-dragging');
+    document.body.classList.add('card-drag');
+  }, 280);
 
   const move = (ev) => {
+    const distance = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+    if (!dragging) {
+      if (distance > 7) { canceled = true; clearTimeout(timer); }
+      return;
+    }
+    if (distance < 7) return;
     // İmlecin üstündeki kartı bul; ortasının üstündeysek önüne, altındaysak arkasına taşı
     const over = [...shotCards.entries()].find(([oid, c]) => {
       if (oid === id) return false;
@@ -194,26 +224,36 @@ function startCardDrag(e, id) {
     const [oid, oc] = over;
     const r = oc.el.getBoundingClientRect();
     const after = ev.clientY > r.top + r.height / 2;
-    const list = state.matches.filter((m) => m.id !== id);
+    const visibleOrder = cardOrder();
+    const list = visibleOrder.filter((matchId) => matchId !== id).map(findMatch);
     let idx = list.findIndex((m) => m.id === oid) + (after ? 1 : 0);
-    const cur = state.matches.findIndex((m) => m.id === id);
-    list.splice(idx, 0, state.matches[cur]);
-    if (list.some((m, i) => m.id !== state.matches[i].id)) {
+    list.splice(idx, 0, findMatch(id));
+    if (list.some((m, i) => m.id !== visibleOrder[i])) {
       state.matches = list;
       moved = true;
-      applyCardOrder();
+      if (state.cardSort === 'auto') {
+        state.cardSort = 'manual';
+        save('cardSort', 'manual');
+        const radio = $('#cardCfg input[name="cardSort"][value="manual"]');
+        if (radio) radio.checked = true;
+        renderShotList();
+      } else applyCardOrder();
     }
   };
-  const up = () => {
+  const up = (ev) => {
+    onPointerUp();
+    clearTimeout(timer);
     target.removeEventListener('pointermove', move);
     target.removeEventListener('pointerup', up);
     target.removeEventListener('pointercancel', up);
+    if (target.hasPointerCapture(e.pointerId)) target.releasePointerCapture(e.pointerId);
     card.classList.remove('card-dragging');
     document.body.classList.remove('card-drag');
+    if (ev.type === 'pointercancel') return;
     if (moved) {
       saveMatches();
       applyLayout(true);
-    }
+    } else if (!dragging && !canceled) openStatsModal(id);
   };
   target.addEventListener('pointermove', move);
   target.addEventListener('pointerup', up);
@@ -225,6 +265,7 @@ function renderShotList() {
   const ids = new Set(state.matches.map((m) => m.id));
   for (const [id, c] of shotCards) {
     if (!ids.has(id)) {
+      if (statsModalMatchId === id) closeStatsModal();
       if (openForm?.matchId === id) closeTargetForm();
       c.el.remove();
       shotCards.delete(id);

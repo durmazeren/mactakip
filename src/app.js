@@ -45,6 +45,8 @@ function removeMatch(id) {
   forgetAlerts(id);
   state.events.delete(id);
   state.stats.delete(id);
+  state.statsRaw.delete(id);
+  players.delete(id);
   state.lastPoll.delete(id);
   delete state.layout.free[id];
   state.layout.z = state.layout.z.filter((x) => x !== id);
@@ -60,6 +62,7 @@ async function resetMatch(id) {
     .filter(Boolean).map((n) => $('.reset-btn', n));
   buttons.forEach((b) => b.classList.add('spinning'));
   state.stats.delete(id);
+  state.statsRaw.delete(id);
   state.lastPoll.delete(id);
   players.delete(id);
   forgetAlerts(id); // yeni veriyle sahte şut uyarısı çıkmasın
@@ -109,13 +112,18 @@ async function pollOne(id) {
   ]);
   if (!findMatch(id)) return true;
   if (evRes?.event) state.events.set(id, evRes.event);
-  if (stRes) state.stats.set(id, parseStats(stRes));
+  if (stRes) {
+    state.statsRaw.set(id, stRes);
+    state.stats.set(id, parseStats(stRes));
+  }
   else if (stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
+    state.statsRaw.delete(id);
     state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
   }
   if (evRes !== undefined) state.lastPoll.set(id, Date.now());
   updateTile(id);
   checkAlerts(id);
+  renderStatsModalIfOpen(id);
   return evRes !== undefined && stRes !== undefined;
 }
 
@@ -223,6 +231,7 @@ function init() {
   initLayout();
   initUpdates();
   initCardSettings();
+  initStatsModal();
   initFullscreen();
   $('#toggleSide').addEventListener('click', () => document.body.classList.toggle('side-hidden'));
   $('#periodSeg').addEventListener('click', (e) => {
