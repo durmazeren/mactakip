@@ -44,7 +44,8 @@ const state = {
   tiles: new Map(),                  // id -> animasyon kutusu durumu
   period: 'ALL',
   addMode: 'anim',                   // arama kutusundan seçilen maç nereye eklensin
-  catalog: { live: [], today: [], loadedAt: 0, loading: null },
+  catalog: { live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, loading: null },
+  leagueFilter: load('leagueFilter', null), // { id, name, category } veya null
   searchResults: [],
   lastShown: new Map(),              // şut ekranında yanıp sönme için önceki değerler
   targets: load('targets', []),      // kupon hedefleri

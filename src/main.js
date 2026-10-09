@@ -4,6 +4,7 @@ const path = require('path');
 const API_BASE = 'https://www.sofascore.com/api/v1/';
 const REPO = 'durmazeren/mactakip';
 const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
+const API_TIMEOUT_MS = 8_000;
 
 let win = null;
 
@@ -49,6 +50,7 @@ ipcMain.handle('sofa:get', async (_e, apiPath) => {
   if (typeof apiPath !== 'string' || apiPath.includes('..')) throw new Error('Geçersiz yol');
   const res = await net.fetch(API_BASE + apiPath.replace(/^\/+/, ''), {
     headers: { Accept: 'application/json', Referer: 'https://www.sofascore.com/' },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Sofascore ${res.status}`);

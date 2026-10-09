@@ -44,7 +44,11 @@ function teamValue(t) {
   if (!st) return undefined;
   if (st.none) return null;
   const p = st[t.period];
-  if (!p) return 0; // periyot henüz başlamadı
+  if (!p) {
+    // 2. yarı başlamadan önceki eksik blok sıfırdır; diğer eksik bloklar bilinmeyen veridir.
+    const code = state.events.get(t.matchId)?.status?.code;
+    return t.period === '2ND' && [6, 31].includes(code) ? 0 : null;
+  }
   const pair = p[t.stat];
   if (!pair) return null;
   if (t.side === 'home') return pair[0];

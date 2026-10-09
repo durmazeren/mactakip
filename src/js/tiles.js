@@ -5,7 +5,7 @@
 function createTile(id) {
   if (state.tiles.has(id)) return;
   const node = $('#tileTpl').content.firstElementChild.cloneNode(true);
-  const tile = { id, el: node, mode: null, webview: null, ready: false, timers: [], fitTimer: null, ro: null };
+  const tile = { id, el: node, mode: null, webview: null, ready: false, trackerH: null, timers: [], fitTimer: null, ro: null };
   $('.close', node).addEventListener('click', () => removeMatch(id));
   $('.to-shot', node).addEventListener('click', () => setAnim(id, false));
   $('.focus-btn', node).addEventListener('click', () => toggleFocus(id));
@@ -20,6 +20,10 @@ function createTile(id) {
   tile.ro.observe($('.stage', node));
   state.tiles.set(id, tile);
   $('#grid').append(node);
+  $('.placeholder', node).replaceChildren(
+    el('b', null, `Maç #${id}`),
+    el('span', null, 'Veri bekleniyor · ↻ ile yeniden dene'),
+  );
   updateTile(id);
 }
 
@@ -36,6 +40,7 @@ function destroyTile(id) {
 function setStage(tile, mode) {
   if (tile.mode === mode) return;
   tile.mode = mode;
+  tile.trackerH = null;
   const stage = $('.stage', tile.el);
   if (tile.webview) { tile.webview.remove(); tile.webview = null; }
   tile.ready = false;
@@ -51,6 +56,7 @@ function setStage(tile, mode) {
       el('span', null, 'Animasyon maç başlayınca kendiliğinden açılır'),
     );
     $('.src', tile.el).textContent = '';
+    if (state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
     return;
   }
 
@@ -95,6 +101,7 @@ function setStage(tile, mode) {
   // Widget içeriği yüklendikçe boyu değişiyor; birkaç saniyede bir yeniden sığdır
   tile.timers.push(setInterval(() => fitTile(tile), 3000));
   $('.src', tile.el).textContent = mode === 'tracker' ? 'Canlı animasyon' : 'Atak grafiği';
+  if (state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
 }
 
 function scheduleFit(tile) {
@@ -125,8 +132,14 @@ function fitTile(tile) {
       if (Math.abs(z - zc) > 0.005) de.style.zoom = String(z);
       // Animasyonu dikeyde ortala
       lmt.style.marginTop = Math.max(0, (H / z - ch) / 2) + 'px';
-      return z;
-    })(${w}, ${h}, ${TRACKER_W})`).catch(() => { /* sayfa henüz hazır değil */ });
+      return { z, ch };
+    })(${w}, ${h}, ${TRACKER_W})`).then((result) => {
+      if (tile.webview !== wv || !result?.ch) return;
+      tile.trackerH = result.ch;
+      if (state.layout.mode !== 'grid' || state.layout.focus || state.layout.arrange !== 'auto') return;
+      const should = useSideStats(tile.el.offsetWidth, tile.el.offsetHeight, result.ch);
+      if (should !== tile.el.classList.contains('side-stats')) applyLayout(false);
+    }).catch(() => { /* sayfa henüz hazır değil */ });
     return;
   }
 

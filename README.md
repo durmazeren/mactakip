@@ -46,12 +46,13 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 
 **Maç ekleme**
 - Üstteki kutuya tıkla: canlı ve bugünkü maçlar listelenir. Takım adı yazarak filtrele, tıklayınca eklenir.
+- Açılan listedeki **Lig** menüsünden bir lig seç. Popüler ligler üstte, diğerleri alfabetik sıralanır. O ligin canlı, bugünkü ve önümüzdeki iki gündeki başlayacak maçları görünür; takım araması seçili lig içinde çalışır. **Tüm ligler** genel listeye döner. Seçim uygulamayı kapatıp açınca korunur.
 - Satırdaki **Şut** düğmesi maçı sadece şut ekranına ekler (animasyon açmaz). Şut ekranındaki **+ Maç ekle** de aynı işi yapar.
 - Listede yoksa Sofascore maç linkini yapıştır (linkin sonunda `#id:12345678` olmalı).
 - Animasyonlu en fazla 12, toplam 30 maç. Seçilen maçlar, hedefler ve düzen kapatıp açınca hatırlanır.
 
 **Animasyon ekranı**
-- **Izgara:** üst bardan dizilim seçilir: **Oto** (animasyonlar en büyük görünecek şekilde), **Yan yana**, **Alt alta**.
+- **Izgara:** üst bardan dizilim seçilir: **Oto** (animasyonları en büyük gösterir; uygun kutularda alt istatistikleri yan boşluğa alır), **Yan yana**, **Alt alta**.
 - **Odak modu:** kutudaki ⤢ düğmesi (veya başlığa çift tıklama) o maçı büyütür; diğerleri yanda/altta küçülür ama odaktakinin en az yarı boyunda kalır. Tekrar ⤡ ya da Esc ile çıkılır.
 - **Serbest:** kutuları başlığından tutup sürükle; dört kenarından ve dört köşesinden boyutlandır. Alanın kenarlarına, yarım / üçte bir / çeyrek çizgilerine ve diğer kutulara yapışır (yapıştığı yerde kılavuz çizgisi görünür). "Düzeni sıfırla" ızgaraya döner.
 - **Tam ekran:** üst bardaki ⛶ düğmesi veya **F** tuşu; üst bar ve şut ekranı gizlenir. Esc veya F ile çıkılır.
@@ -63,6 +64,7 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
   - **Elle:** kartı takım adlarından tutup sürükle. Sıra animasyon ızgarasına da yansır.
   - **Otomatik:** hedefli canlı maçlar üstte, sonra canlı, başlamamış ve en altta küçülmüş halde biten maçlar.
 - Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
+- Gol olunca şut kartı birkaç saniyeliğine tam boy bir gol animasyonuna dönüşür; ardından istatistik ve hedefler kaldığı yerden görünür.
 - ▷ / ▶ ile maçın animasyonu açılır/kapanır.
 - ↻ (kartta ve animasyon kutusunda): veri gelmiyor ya da animasyon takıldıysa o maçı baştan yükler.
 - Sofascore değeri 0 olan satırları göndermediği için eksik şut / isabetli şut, diğer şut satırlarından hesaplanır.

@@ -116,7 +116,7 @@ async function pollOne(id) {
   if (evRes !== undefined) state.lastPoll.set(id, Date.now());
   updateTile(id);
   checkAlerts(id);
-  return evRes !== undefined;
+  return evRes !== undefined && stRes !== undefined;
 }
 
 let polling = false;
@@ -233,16 +233,14 @@ function init() {
     renderShotList();
   });
 
-  // Kayıtlı maçları geri yükle
-  const saved = state.matches;
-  state.matches = [];
-  (async () => {
-    for (const m of saved) await addMatch(m.id, null, m.anim);
-    // Maç listesini kutular yüklendikten sonra hazırla
-    setTimeout(() => loadCatalog(), 3000);
-  })();
-
+  // Kayıtlı liste ağ hatasında korunur; veri gelmeyen maç sonraki turda tekrar denenir.
+  for (const m of state.matches) if (m.anim) createTile(m.id);
   refresh(false);
+  if (state.matches.length) {
+    setStatus('Kayıtlı maçlar yükleniyor…');
+    pollAll();
+  }
+  setTimeout(() => loadCatalog(), 3000);
   setInterval(pollAll, POLL_MS);
   setInterval(tickMinutes, 1000);
 }

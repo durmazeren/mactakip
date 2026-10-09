@@ -12,10 +12,21 @@ const SNAP_PX = 10;
 const MIN_W = 240;
 const MIN_H = 160;
 const TILE_CHROME = 62;        // kutu başlığı + alt satır yüksekliği
+const SIDE_STATS_W = 130;      // Oto: istatistiklerin yandaki boşlukta kapladığı genişlik
+const SIDE_STATS_HEAD = 36;   // Oto: sabit başlık yüksekliği
 
 // Animasyonun bu kutuda ne kadar büyük görüneceği (1 = doğal boyut)
 function contentScale(w, h) {
   return Math.min(w / TRACKER_W, Math.max(0, h - TILE_CHROME) / TRACKER_H);
+}
+
+// Oto yalnızca Sofascore animasyonu gerçekten büyütecekse yan istatistik düzenine geçer.
+// Yükseklik canlı webview'den ölçülür; ilk yüklemede doğal boyut kullanılır.
+function useSideStats(w, h, contentH = TRACKER_H) {
+  if (w <= SIDE_STATS_W || h <= SIDE_STATS_HEAD) return false;
+  const current = Math.min(w / TRACKER_W, Math.max(0, h - TILE_CHROME) / contentH);
+  const side = Math.min((w - SIDE_STATS_W) / TRACKER_W, (h - SIDE_STATS_HEAD) / contentH);
+  return side > current * 1.03;
 }
 
 // n kutu için animasyonları en büyük gösteren sütun/satır sayısını bulur
@@ -36,7 +47,7 @@ function bestGrid(n, W, H) {
 }
 
 /* Izgara dizilimi:
- *  auto: animasyonları en büyük gösteren düzen
+ *  auto: animasyonları en büyük gösteren düzen; uygunsa alt istatistikler yana alınır
  *  row:  yan yana (satır başına en fazla 4 maç)
  *  col:  alt alta (sütun başına en fazla 4 maç) */
 function gridFor(n, W, H, arrange) {
@@ -174,6 +185,9 @@ function applyLayout(animate = false) {
     const r = rects[id];
     if (!t || !r) continue;
     setRect(t.el, r);
+    t.el.classList.toggle('side-stats', lay.mode === 'grid' && !lay.focus &&
+      lay.arrange === 'auto' && t.mode === 'tracker' &&
+      useSideStats(Math.round(r.w), Math.round(r.h), t.trackerH || TRACKER_H));
     const focused = lay.mode === 'grid' && lay.focus === id;
     t.el.classList.toggle('focused', focused);
     const fb = $('.focus-btn', t.el);
@@ -370,6 +384,11 @@ function startResize(e, tile, dir) {
 }
 
 function initLayout() {
+  // Önceki sürümdeki Oto+ tercihini birleşik Oto düzenine taşı.
+  if (state.layout.arrange === 'compact') {
+    state.layout.arrange = 'auto';
+    saveLayout();
+  }
   $('#layoutSeg').addEventListener('click', (e) => {
     const mode = e.target?.dataset?.layout;
     if (mode) setLayoutMode(mode);

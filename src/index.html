@@ -19,7 +19,7 @@
       <button data-layout="free">Serbest</button>
     </div>
     <div class="seg" id="arrangeSeg" title="Izgara dizilimi">
-      <button data-arrange="auto" class="on" title="Animasyonları en büyük gösteren düzen">Oto</button>
+      <button data-arrange="auto" class="on" title="Animasyonları en büyük gösterir; uygun kutularda yan boşluğu kullanır">Oto</button>
       <button data-arrange="row" title="Maçlar yan yana">Yan yana</button>
       <button data-arrange="col" title="Maçlar alt alta">Alt alta</button>
     </div>
@@ -84,7 +84,16 @@
         <button class="icon-btn to-shot" title="Animasyonu kapat (sadece şut ekranında kalsın)">▭</button>
         <button class="icon-btn close" title="Maçı kaldır">✕</button>
       </div>
-      <div class="stage"><div class="placeholder"></div></div>
+      <div class="stage">
+        <div class="placeholder"></div>
+        <div class="goal-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <div class="goal-overlay-content">
+            <div class="goal-overlay-word">GOOOOOOOOOOOOL</div>
+            <span class="goal-overlay-team"></span>
+            <strong class="goal-overlay-score" aria-label="Maç skoru"></strong>
+          </div>
+        </div>
+      </div>
       <div class="tile-foot">
         <span>Şut <b class="shots">–</b></span>
         <span>İsabetli <b class="sot">–</b></span>

@@ -60,8 +60,18 @@ function ensureCard(id) {
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');
   const formHost = el('div');
+  const goalOverlay = el('div', 'goal-overlay');
+  goalOverlay.setAttribute('role', 'status');
+  goalOverlay.setAttribute('aria-live', 'polite');
+  goalOverlay.setAttribute('aria-atomic', 'true');
+  const goalContent = el('div', 'goal-overlay-content');
+  const goalWord = el('div', 'goal-overlay-word', 'GOOOOOOOOOOOOOL');
+  const goalScore = el('strong', 'goal-overlay-score');
+  goalScore.setAttribute('aria-label', 'Maç skoru');
+  goalContent.append(goalWord, el('span', 'goal-overlay-team'), goalScore);
+  goalOverlay.append(goalContent);
 
-  card.append(top, statsBox, none, targets, formHost, el('div', 'alert-badge'));
+  card.append(top, statsBox, none, targets, formHost, el('div', 'alert-badge'), goalOverlay);
   $('#shotList').append(card);
   const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows, none, targets, formHost };
   shotCards.set(id, ref);
@@ -85,6 +95,7 @@ function setCmp(row, id, key, val) {
     const k = `${id}|${state.period}|${key}|${side}`;
     const prev = state.lastShown.get(k);
     if (v != null && prev != null && v !== prev) restartClass(node, 'flash');
+    if (v != null && prev != null && v > prev) restartClass(side === 'h' ? row.hb : row.ab, 'shot-burst');
     if (v != null) state.lastShown.set(k, v);
   }
 }
@@ -92,19 +103,36 @@ function setCmp(row, id, key, val) {
 function updateCard(id) {
   const ev = state.events.get(id);
   const m = findMatch(id);
-  if (!ev || !m) return;
+  if (!m) return;
   const c = ensureCard(id);
   c.el.classList.toggle('shot-only', !m.anim);
+  c.targetBtn.disabled = !ev;
+  c.animBtn.textContent = m.anim ? '▶' : '▷';
+  c.animBtn.classList.toggle('on', m.anim);
+  c.animBtn.title = m.anim ? 'Animasyonu kapat (sadece şut ekranında kalsın)' : 'Animasyonu aç';
+  if (!ev) {
+    c.el.classList.remove('live');
+    c.meta.classList.remove('live');
+    c.homeN.textContent = `Maç #${id}`;
+    c.awayN.textContent = '';
+    c.score.textContent = '';
+    c.meta.textContent = 'Yükleniyor';
+    c.statsBox.hidden = true;
+    c.none.hidden = false;
+    c.none.textContent = 'Veri bekleniyor · ↻ ile yeniden dene';
+    c.targets.hidden = true;
+    return;
+  }
+  c.none.textContent = 'Sofascore bu maç için istatistik tutmuyor';
   c.homeN.textContent = teamName(ev.homeTeam);
   c.awayN.textContent = teamName(ev.awayTeam);
   c.score.textContent = scoreText(ev);
   c.title.title = `${ev.homeTeam?.name} – ${ev.awayTeam?.name}`;
   c.meta.textContent = minuteText(ev);
-  c.meta.classList.toggle('live', isLive(ev));
+  const live = isLive(ev);
+  c.meta.classList.toggle('live', live);
+  c.el.classList.toggle('live', live);
   c.targetBtn.classList.toggle('on', openForm?.matchId === id);
-  c.animBtn.textContent = m.anim ? '▶' : '▷';
-  c.animBtn.classList.toggle('on', m.anim);
-  c.animBtn.title = m.anim ? 'Animasyonu kapat (sadece şut ekranında kalsın)' : 'Animasyonu aç';
 
   const all = state.stats.get(id);
   const none = !!all?.none;
@@ -203,7 +231,6 @@ function renderShotList() {
     }
   }
   for (const m of state.matches) {
-    if (!state.events.has(m.id)) continue;
     const c = ensureCard(m.id);
     c.el.classList.toggle('collapsed', state.cardSort === 'auto' && isOver(state.events.get(m.id)));
     c.el.classList.toggle('sortable', state.cardSort !== 'auto');
