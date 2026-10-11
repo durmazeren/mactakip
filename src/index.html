@@ -36,6 +36,12 @@
     </div>
   </header>
 
+  <div id="sofaConnection" class="connection-notice" hidden role="status">
+    <span id="sofaConnectionText"></span>
+    <button id="sofaOpen" class="btn btn-sm" title="Aynı oturumda siteyi aç; doğrulama istenirse tamamlayıp bağlantıyı tekrar kontrol et">SofaScore'u aç</button>
+    <button id="sofaRetry" class="btn btn-primary btn-sm" title="Ağ değişiminden veya site doğrulamasından sonra tek istekle yeniden dene">Bağlantıyı kontrol et</button>
+  </div>
+
   <main class="layout">
     <section id="grid" class="grid">
       <div id="guideV" class="guide v" hidden></div>
@@ -68,33 +74,50 @@
     </aside>
   </main>
 
+  <div id="statsBackdrop" class="stats-backdrop" hidden></div>
+
   <dialog id="statsDialog" class="stats-dialog" aria-labelledby="statsTitle">
-    <div class="stats-dialog-head">
-      <div class="stats-dialog-heading">
-        <span class="stats-dialog-kicker">MAÇ İSTATİSTİKLERİ</span>
-        <h2 id="statsTitle"></h2>
-        <span id="statsMeta" class="stats-dialog-meta"></span>
-      </div>
-      <button id="statsClose" class="icon-btn stats-dialog-close" aria-label="İstatistikleri kapat">✕</button>
+    <div class="stats-workspace">
+      <section class="stats-panel">
+        <div class="stats-dialog-head">
+          <div class="stats-dialog-heading">
+            <span class="stats-dialog-kicker">MAÇ İSTATİSTİKLERİ</span>
+            <div class="stats-title-row">
+              <img id="statsHomeLogo" class="logo" alt="">
+              <h2 id="statsTitle"></h2>
+              <img id="statsAwayLogo" class="logo" alt="">
+            </div>
+            <span id="statsMeta" class="stats-dialog-meta"></span>
+          </div>
+          <button id="statsClose" class="icon-btn stats-dialog-close" aria-label="İstatistikleri kapat">✕</button>
+        </div>
+        <div id="statsViews" class="stats-view-tabs" role="tablist" aria-label="İstatistik görünümü">
+          <button data-stats-view="team" class="on" role="tab">İstatistikler</button>
+          <button data-stats-view="players" role="tab">Oyuncular</button>
+        </div>
+        <div id="statsTabs" class="stats-dialog-tabs" role="tablist" aria-label="İstatistik dönemi">
+          <button data-stats-tab="ALL" class="on" role="tab">Tümü</button>
+          <button data-stats-tab="1ST" role="tab">1. yarı</button>
+          <button data-stats-tab="2ND" role="tab">2. yarı</button>
+        </div>
+        <div id="statsBody" class="stats-dialog-body"></div>
+        <div class="stats-match-nav">
+          <button id="statsPrevMatch" aria-label="Önceki maç">‹</button>
+          <span id="statsMatchPosition"></span>
+          <button id="statsNextMatch" aria-label="Sonraki maç">›</button>
+        </div>
+      </section>
     </div>
-    <div id="statsTabs" class="stats-dialog-tabs" role="tablist" aria-label="İstatistik dönemi">
-      <button data-stats-tab="ALL" class="on" role="tab">Maç</button>
-      <button data-stats-tab="1ST" role="tab">1. yarı</button>
-      <button data-stats-tab="2ND" role="tab">2. yarı</button>
-      <button data-stats-tab="players" role="tab">Oyuncular</button>
-    </div>
-    <div id="statsBody" class="stats-dialog-body"></div>
   </dialog>
 
   <template id="tileTpl">
     <article class="tile">
       <div class="tile-head">
+        <button class="icon-btn switch-match" title="Bu animasyondaki maçı değiştir" aria-label="Bu animasyondaki maçı değiştir">⇄</button>
         <div class="teams">
-          <img class="logo home-logo" alt="">
-          <span class="home-name"></span>
+          <span class="team-pair home-pair"><img class="logo home-logo" alt=""><span class="home-name"></span></span>
           <span class="score">–</span>
-          <span class="away-name"></span>
-          <img class="logo away-logo" alt="">
+          <span class="team-pair away-pair"><img class="logo away-logo" alt=""><span class="away-name"></span></span>
         </div>
         <span class="minute"></span>
         <button class="icon-btn reset-btn" title="Bu maçı yenile (veriyi ve animasyonu baştan yükle)">↻</button>

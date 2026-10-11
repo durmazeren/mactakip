@@ -1,15 +1,26 @@
-const { app, BrowserWindow, ipcMain, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, net, shell, session } = require('electron');
 const path = require('path');
+const { createSofaClient, SOFA_PARTITION } = require('./sofa-client');
 
-const API_BASE = 'https://www.sofascore.com/api/v1/';
 const REPO = 'durmazeren/mactakip';
 const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
-const API_TIMEOUT_MS = 8_000;
 
 let win = null;
+let sofaClient = null;
+let sofaWindow = null;
 
 // Geliştirme/test için ayrı veri klasörü (açık olan asıl uygulamanın listesine dokunmamak için)
 if (process.env.MT_USER_DATA) app.setPath('userData', process.env.MT_USER_DATA);
+
+// İkinci açılış yeni veri sorguları başlatmasın; mevcut pencereye dönsün.
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+else app.on('second-instance', () => {
+  if (!win || win.isDestroyed()) { if (app.isReady()) createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
 
 function createWindow() {
   win = new BrowserWindow({
@@ -44,17 +55,23 @@ function createWindow() {
   });
 }
 
-// Sofascore isteklerini Chromium ağ katmanından yapıyoruz: sunucu tarafı
-// istemcileri (curl, node fetch) 403 alıyor, Electron'un net modülü almıyor.
+// Veri, animasyon ve kullanıcının açtığı SofaScore sayfası aynı oturumu kullanır.
 ipcMain.handle('sofa:get', async (_e, apiPath) => {
-  if (typeof apiPath !== 'string' || apiPath.includes('..')) throw new Error('Geçersiz yol');
-  const res = await net.fetch(API_BASE + apiPath.replace(/^\/+/, ''), {
-    headers: { Accept: 'application/json', Referer: 'https://www.sofascore.com/' },
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+  try { return { ok: true, data: await sofaClient.get(apiPath) }; }
+  catch (err) { return { ok: false, error: { message: err.message, code: err.code,
+    status: err.status, retryAt: err.retryAt } }; }
+});
+ipcMain.handle('sofa:state', () => sofaClient.getState());
+ipcMain.handle('sofa:retry', () => sofaClient.retry());
+ipcMain.handle('sofa:open', () => {
+  if (sofaWindow && !sofaWindow.isDestroyed()) { sofaWindow.show(); sofaWindow.focus(); return; }
+  sofaWindow = new BrowserWindow({
+    width: 1100, height: 800, title: 'SofaScore · Bağlantı kontrolü',
+    webPreferences: { partition: SOFA_PARTITION, nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`Sofascore ${res.status}`);
-  return res.json();
+  sofaWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  sofaWindow.on('closed', () => { sofaWindow = null; });
+  sofaWindow.loadURL('https://www.sofascore.com/').catch(() => {});
 });
 
 /* ---------- Güncelleme (isteğe bağlı) ----------
@@ -117,6 +134,10 @@ ipcMain.handle('update:install', () => {
 ipcMain.handle('app:version', () => app.getVersion());
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return;
+  const sofaSession = session.fromPartition(SOFA_PARTITION);
+  sofaClient = createSofaClient({ fetch: (url, options) => sofaSession.fetch(url, options),
+    onState: (state) => { if (win && !win.isDestroyed()) win.webContents.send('sofa:status', state); } });
   createWindow();
   setupUpdater();
   win.webContents.once('did-finish-load', () => setTimeout(checkForUpdates, 5000));

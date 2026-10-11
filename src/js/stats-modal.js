@@ -1,7 +1,7 @@
 'use strict';
 
-/* Şut kartından açılan maç ve oyuncu istatistikleri. Ağ isteği yalnızca
- * oyuncu sekmesi ilk kez açıldığında (veya kullanıcı yenilediğinde) eklenir. */
+/* Maç paneli mevcut istatistikleri kullanır. Açık animasyon taşınmadan büyütülür.
+ * Kadro yalnızca Oyuncular sekmesi açılınca, önbellekte yoksa istenir. */
 
 const STAT_GROUP_NAMES = {
   'Match overview': 'Genel bakış',
@@ -59,12 +59,23 @@ const PLAYER_STAT_NAMES = {
   totalBallCarriesDistance: 'Top sürme mesafesi', ballCarriesCount: 'Top sürme sayısı',
   totalProgression: 'Topla ilerleme', progressiveBallCarriesCount: 'İleri top taşıma',
   keeperSaveValue: 'Kurtarış değeri',
+  totalCross: 'Orta', accurateCross: 'İsabetli orta', aerialLost: 'Kaybedilen hava topu',
+  duelLost: 'Kaybedilen mücadele', dispossessed: 'Top kaptırma', totalContest: 'Çalım denemesi',
+  wonContest: 'Başarılı çalım', shotOffTarget: 'İsabetsiz şut',
+  blockedScoringAttempt: 'Bloklanan şut', wonTackle: 'Başarılı müdahale',
+  unsuccessfulTouch: 'Hatalı kontrol', wasFouled: 'Kazanılan faul', fouls: 'Faul',
+  expectedGoalsOnTarget: 'İsabetli şut xG (xGOT)', totalKeeperSweeper: 'Kaleci çıkışı',
+  accurateKeeperSweeper: 'Başarılı kaleci çıkışı', bestBallCarryProgression: 'En uzun ilerleme',
+  totalProgressiveBallCarriesDistance: 'İleri top taşıma mesafesi',
 };
 const PLAYER_HIDDEN_KEYS = new Set(['ratingVersions', 'statisticsType']);
 
 let statsModalMatchId = null;
 let statsModalTab = 'ALL';
+let statsModalView = 'team';
 let statsModalSide = 'home';
+let statsModalPlayerId = null;
+let statsPreview = null;
 const statsModalPlayerRequests = new Map();
 
 function statValue(value, numeric) {
@@ -84,12 +95,60 @@ function statsEmpty(message, retry = null) {
   return box;
 }
 
+function statNumber(item, side) {
+  const value = item[side + 'Value'] ?? item[side];
+  const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function renderStatRow(item) {
+  const home = statNumber(item, 'home');
+  const away = statNumber(item, 'away');
+  const max = Math.max(home, away, 1);
+  const row = el('div', 'stats-comparison');
+  const heading = el('div', 'stats-comparison-heading');
+  heading.append(
+    el('strong', 'stats-home', statValue(item.home, item.homeValue)),
+    el('span', 'stats-label', STAT_NAMES[item.key] || item.name || item.key),
+    el('strong', 'stats-away', statValue(item.away, item.awayValue)),
+  );
+  row.append(heading);
+  if (item.key === 'ballPossession') {
+    const total = home + away || 1;
+    const possession = el('div', 'stats-possession');
+    const first = el('span', 'home');
+    first.style.width = `${home / total * 100}%`;
+    possession.append(first, el('span', 'away'));
+    row.append(possession);
+  } else if (['duelWonPercent', 'groundDuelsPercentage', 'aerialDuelsPercentage',
+    'dribblesPercentage', 'wonTacklePercent'].includes(item.key)) {
+    const rings = el('div', 'stats-rings');
+    for (const side of ['home', 'away']) {
+      const value = statPercentage(item, side);
+      const ring = el('span', `stats-ring ${side}`, `${Math.round(value)}%`);
+      ring.style.setProperty('--ring-value', `${Math.min(100, value)}%`);
+      rings.append(ring);
+    }
+    row.append(rings);
+  } else {
+    const bars = el('div', 'stats-bars');
+    for (const [side, value] of [['home', home], ['away', away]]) {
+      const track = el('span', `stats-track ${side}`);
+      const fill = el('i');
+      fill.style.width = `${Math.min(100, value / max * 100)}%`;
+      track.append(fill);
+      bars.append(track);
+    }
+    row.append(bars);
+  }
+  return row;
+}
+
 function renderTeamStats(id) {
   const raw = state.statsRaw.get(id);
   if (!raw) return statsEmpty(state.stats.get(id)?.none
     ? 'Sofascore bu maç için ayrıntılı istatistik vermiyor.'
-    : 'İstatistikler yükleniyor. Birazdan yeniden denenecek.',
-  state.stats.get(id)?.none ? null : () => pollOne(id));
+    : 'İstatistikler henüz alınamadı. Mevcut bağlantı durumunu kontrol et.');
   const block = raw.statistics?.find((item) => item.period === statsModalTab);
   if (!block?.groups?.length) return statsEmpty('Bu dönem için istatistik henüz yok.');
   const container = el('div', 'stats-groups');
@@ -97,15 +156,7 @@ function renderTeamStats(id) {
     if (!group.statisticsItems?.length) continue;
     const section = el('section', 'stats-group');
     section.append(el('h3', null, STAT_GROUP_NAMES[group.groupName] || group.groupName));
-    for (const item of group.statisticsItems) {
-      const row = el('div', 'stats-row');
-      row.append(
-        el('span', 'stats-home', statValue(item.home, item.homeValue)),
-        el('span', 'stats-label', STAT_NAMES[item.key] || item.name || item.key),
-        el('span', 'stats-away', statValue(item.away, item.awayValue)),
-      );
-      section.append(row);
-    }
+    for (const item of group.statisticsItems) section.append(renderStatRow(item));
     container.append(section);
   }
   return container.children.length ? container : statsEmpty('Bu dönem için istatistik henüz yok.');
@@ -143,30 +194,58 @@ function renderPlayerStats(id) {
     const button = el('button', side === statsModalSide ? 'on' : '', teamName(ev?.[side + 'Team']));
     button.addEventListener('click', () => {
       statsModalSide = side;
+      statsModalPlayerId = null;
       $('#statsBody').scrollTop = 0;
       renderStatsModal();
     });
     switcher.append(button);
   }
-  const refresh = el('button', 'stats-player-refresh', statsModalPlayerRequests.has(id) ? 'Yenileniyor…' : '↻ Oyuncuları yenile');
-  refresh.disabled = statsModalPlayerRequests.has(id);
-  refresh.addEventListener('click', () => ensureModalPlayers(id, true));
-  root.append(switcher, refresh);
-  const expanded = new Set([...$('#statsBody').querySelectorAll('.stats-player[open]')].map((node) => node.dataset.playerId));
-  const list = el('div', 'stats-player-list');
-  for (const player of rec.list.filter((item) => item.side === statsModalSide)) {
-    const details = el('details', 'stats-player');
-    details.dataset.playerId = String(player.id);
-    details.open = expanded.has(String(player.id));
-    const summary = el('summary', 'stats-player-summary');
-    summary.append(
-      el('span', 'stats-player-number', player.num || '–'),
-      el('span', 'stats-player-name', player.name),
-      el('span', 'stats-player-status', player.starter ? 'İlk 11' : 'Yedek'),
-    );
+  root.append(switcher);
+  const sidePlayers = rec.list.filter((item) => item.side === statsModalSide);
+  if (!sidePlayers.some((item) => item.id === statsModalPlayerId)) statsModalPlayerId = sidePlayers[0]?.id ?? null;
+  const starters = sidePlayers.filter((item) => item.starter);
+  const formation = String(rec.formation?.[statsModalSide] || '');
+  const bands = formation.split('-').map(Number);
+  const hasFormation = starters.length === 11 && bands.length >= 3
+    && bands.every((n) => n > 0) && bands.reduce((a, b) => a + b, 0) === 10;
+  if (hasFormation) {
+    const pitch = el('div', 'stats-lineup-pitch');
+    pitch.append(el('span', 'stats-lineup-formation', `Diziliş ${formation}`));
+    const keeper = starters.find((item) => item.position === 'G') || starters[0];
+    const fieldPlayers = starters.filter((item) => item !== keeper);
+    let offset = 0;
+    const rows = [];
+    for (const size of bands) { rows.push(fieldPlayers.slice(offset, offset + size)); offset += size; }
+    for (const playersInRow of [...rows].reverse().concat([[keeper]])) {
+      const row = el('div', 'stats-lineup-row');
+      for (const player of playersInRow) row.append(playerPickerButton(player, rec));
+      pitch.append(row);
+    }
+    root.append(pitch);
+  } else {
+    const list = el('div', 'stats-player-picker-list');
+    for (const player of sidePlayers) list.append(playerPickerButton(player, rec));
+    root.append(list.children.length ? list : statsEmpty('Bu takımın kadrosu henüz yok.'));
+  }
+  const bench = sidePlayers.filter((item) => !item.starter);
+  if (bench.length && hasFormation) {
+    const list = el('div', 'stats-bench');
+    list.append(el('h3', null, 'Yedekler'));
+    for (const player of bench) list.append(playerPickerButton(player, rec));
+    root.append(list);
+  }
+  if (sidePlayers.length) {
+    const index = sidePlayers.findIndex((item) => item.id === statsModalPlayerId);
+    const player = sidePlayers[index];
+    const detail = el('section', 'stats-player-detail');
+    const head = el('div', 'stats-player-detail-head');
+    const photo = playerAvatar(player, 'stats-player-photo');
+    const heading = el('div');
+    heading.append(el('h3', null, player.name), el('span', null, `${player.num || '–'} · ${player.starter ? 'İlk 11' : 'Yedek'}`));
+    head.append(photo, heading);
     const data = rec.details.get(player.id);
-    if (data?.rating != null) summary.append(el('strong', 'stats-player-rating', playerStatValue(data.rating)));
-    details.append(summary);
+    if (data?.rating != null) head.append(playerRating(data.rating));
+    detail.append(head);
     if (data) {
       const values = el('div', 'stats-player-values');
       for (const [key, value] of Object.entries(data)) {
@@ -176,42 +255,120 @@ function renderPlayerStats(id) {
         row.append(el('span', null, playerStatLabel(key)), el('strong', null, playerStatValue(value)));
         values.append(row);
       }
-      details.append(values);
-    } else {
-      details.append(el('div', 'stats-player-no-data', 'Henüz oyuncu istatistiği yok.'));
-    }
-    list.append(details);
+      detail.append(values);
+    } else detail.append(el('div', 'stats-player-no-data', 'Henüz oyuncu istatistiği yok.'));
+    const nav = el('div', 'stats-player-nav');
+    const previous = el('button', 'stats-arrow', '‹');
+    const next = el('button', 'stats-arrow', '›');
+    previous.setAttribute('aria-label', 'Önceki oyuncu');
+    next.setAttribute('aria-label', 'Sonraki oyuncu');
+    previous.addEventListener('click', () => { statsModalPlayerId = sidePlayers[(index + sidePlayers.length - 1) % sidePlayers.length].id; renderStatsModal(); });
+    next.addEventListener('click', () => { statsModalPlayerId = sidePlayers[(index + 1) % sidePlayers.length].id; renderStatsModal(); });
+    nav.append(previous, el('span', null, `${index + 1} / ${sidePlayers.length} · ${player.name}`), next);
+    detail.append(nav);
+    root.append(detail);
   }
-  root.append(list.children.length ? list : statsEmpty('Bu takımın oyuncu listesi henüz yok.'));
+  const refresh = el('button', 'stats-player-refresh', statsModalPlayerRequests.has(id) ? 'Yenileniyor…' : '↻ Oyuncuları yenile');
+  refresh.title = 'En fazla dakikada bir yenilenir';
+  refresh.disabled = statsModalPlayerRequests.has(id);
+  refresh.addEventListener('click', () => ensureModalPlayers(id, true));
+  root.append(refresh);
   return root;
+}
+
+function playerPickerButton(player, rec) {
+  const button = el('button', player.id === statsModalPlayerId ? 'stats-lineup-player on' : 'stats-lineup-player');
+  button.dataset.playerId = String(player.id);
+  const photo = playerAvatar(player);
+  button.append(photo, el('span', null, `${player.num || ''} ${player.name}`.trim()));
+  const rating = rec.details.get(player.id)?.rating;
+  if (rating != null) button.append(playerRating(rating));
+  button.addEventListener('click', () => {
+    statsModalPlayerId = player.id;
+    renderStatsModal();
+    $('#statsBody').querySelector('.stats-player-detail')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  return button;
 }
 
 function renderStatsModal() {
   const id = statsModalMatchId;
   if (id == null || !findMatch(id)) return;
   const ev = state.events.get(id);
+  const body = $('#statsBody');
+  const scroll = body.scrollTop;
+  const focusedPlayer = document.activeElement?.dataset?.playerId;
   $('#statsTitle').textContent = ev
     ? `${teamName(ev.homeTeam)}  ${scoreText(ev)}  ${teamName(ev.awayTeam)}`
     : `Maç #${id}`;
+  for (const side of ['Home', 'Away']) {
+    const logo = $(`#stats${side}Logo`);
+    const team = ev?.[side.toLowerCase() + 'Team'];
+    logo.hidden = !team?.id;
+    if (team?.id && logo.getAttribute('src') !== LOGO_URL(team.id)) logo.src = LOGO_URL(team.id);
+  }
   $('#statsMeta').textContent = ev
     ? [ev.tournament?.uniqueTournament?.name || ev.tournament?.name, minuteText(ev)].filter(Boolean).join(' · ')
     : 'Veri bekleniyor';
+  for (const button of $('#statsViews').children) {
+    const active = button.dataset.statsView === statsModalView;
+    button.classList.toggle('on', active);
+    button.setAttribute('aria-selected', String(active));
+  }
+  $('#statsTabs').hidden = statsModalView === 'players';
   for (const button of $('#statsTabs').children) {
     const active = button.dataset.statsTab === statsModalTab;
     button.classList.toggle('on', active);
     button.setAttribute('aria-selected', String(active));
   }
-  $('#statsBody').replaceChildren(statsModalTab === 'players' ? renderPlayerStats(id) : renderTeamStats(id));
+  body.replaceChildren(statsModalView === 'players' ? renderPlayerStats(id) : renderTeamStats(id));
+  body.scrollTop = scroll;
+  if (focusedPlayer) body.querySelector(`[data-player-id="${focusedPlayer}"]`)?.focus({ preventScroll: true });
+  const ids = cardOrder();
+  const position = ids.indexOf(id);
+  $('#statsMatchPosition').textContent = `${position + 1} / ${ids.length} · ${ev ? teamName(ev.homeTeam) + ' – ' + teamName(ev.awayTeam) : 'Maç #' + id}`;
+  $('#statsPrevMatch').disabled = ids.length < 2;
+  $('#statsNextMatch').disabled = ids.length < 2;
+  syncStatsPreview(id);
 }
 
 function renderStatsModalIfOpen(id) {
-  if (statsModalMatchId === id && $('#statsDialog').open) renderStatsModal();
+  if (statsModalMatchId === id && $('#statsDialog').open) {
+    renderStatsModal();
+  }
+}
+
+function destroyStatsPreview() {
+  if (!statsPreview) return;
+  const previous = statsPreview;
+  statsPreview = null;
+  previous.el.classList.remove('stats-preview-active');
+  previous.preview = false;
+  if (!findMatch(previous.id)?.anim) destroyTile(previous.id);
+  else scheduleFit(previous);
+}
+
+function syncStatsPreview(id) {
+  const top = $('#grid').getBoundingClientRect().top;
+  document.body.style.setProperty('--stats-top', `${top}px`);
+  if (statsPreview?.id === id) return;
+  destroyStatsPreview();
+  let tile = state.tiles.get(id);
+  // Şut ekranına eklenmiş maç için yalnızca açık panel süresince bir animasyon.
+  if (!tile) { createTile(id, true); tile = state.tiles.get(id); }
+  statsPreview = tile;
+  tile.preview = true;
+  tile.el.classList.add('stats-preview-active');
+  scheduleFit(tile);
 }
 
 function ensureModalPlayers(id, force = false) {
   if (!force && players.has(id)) return;
+  const rec = players.get(id);
+  // Sekme ve yenile düğmesi aynı kadroyu tekrar tekrar istemesin.
+  if (force && rec?.loadedAt && Date.now() - rec.loadedAt < 60_000) return;
   if (statsModalPlayerRequests.has(id)) return;
-  const request = loadPlayers(id, needsPlayers(id)).catch(() => null).finally(() => {
+  const request = loadPlayers(id, false).catch(() => null).finally(() => {
     statsModalPlayerRequests.delete(id);
     renderStatsModalIfOpen(id);
   });
@@ -223,35 +380,99 @@ function openStatsModal(id) {
   if (!findMatch(id)) return;
   statsModalMatchId = id;
   statsModalTab = ['ALL', '1ST', '2ND'].includes(state.period) ? state.period : 'ALL';
+  statsModalView = 'team';
   statsModalSide = 'home';
+  statsModalPlayerId = null;
   const dialog = $('#statsDialog');
-  if (!dialog.open) dialog.showModal();
+  closeDropdown();
+  document.body.classList.add('stats-open');
+  $('#statsBackdrop').hidden = false;
+  if (!dialog.open) dialog.show();
   $('#statsBody').scrollTop = 0;
   renderStatsModal();
   $('#statsClose').focus();
 }
 
-function closeStatsModal() {
+function stepStatsMatch(direction) {
+  const ids = cardOrder();
+  if (ids.length < 2) return;
+  const index = ids.indexOf(statsModalMatchId);
+  statsModalMatchId = ids[(index + direction + ids.length) % ids.length];
+  statsModalSide = 'home';
+  statsModalPlayerId = null;
+  $('#statsBody').scrollTop = 0;
+  renderStatsModal();
+  if (statsModalView === 'players') ensureModalPlayers(statsModalMatchId);
+}
+
+function clearStatsPanel(restoreFocus = true) {
+  const id = statsModalMatchId;
+  statsModalMatchId = null;
+  destroyStatsPreview();
+  document.body.classList.remove('stats-open');
+  $('#statsBackdrop').hidden = true;
+  if (restoreFocus) shotCards.get(id)?.title.focus();
+}
+
+function closeStatsModal(restoreFocus = true) {
   const dialog = $('#statsDialog');
-  if (dialog.open) dialog.close();
+  if (!dialog.open) return;
+  clearStatsPanel(restoreFocus);
+  dialog.close();
 }
 
 function initStatsModal() {
   const dialog = $('#statsDialog');
-  $('#statsClose').addEventListener('click', closeStatsModal);
-  dialog.addEventListener('click', (event) => {
-    if (event.target === dialog) closeStatsModal();
-  });
+  $('#statsClose').addEventListener('click', () => closeStatsModal());
+  $('#statsPrevMatch').addEventListener('click', () => stepStatsMatch(-1));
+  $('#statsNextMatch').addEventListener('click', () => stepStatsMatch(1));
   dialog.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') event.stopPropagation();
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeStatsModal(); }
+    if (event.key === 'Tab') {
+      const controls = [...dialog.querySelectorAll('button:not(:disabled)')].filter((node) => node.getClientRects().length);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
   });
-  dialog.addEventListener('close', () => { statsModalMatchId = null; });
+  dialog.addEventListener('close', () => {
+    if (statsModalMatchId != null) clearStatsPanel();
+  });
+  $('#statsBackdrop').addEventListener('click', () => closeStatsModal());
+  window.addEventListener('resize', () => { if (dialog.open) syncStatsPreview(statsModalMatchId); });
+  $('#statsViews').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-stats-view]');
+    if (!button || statsModalMatchId == null) return;
+    statsModalView = button.dataset.statsView;
+    if (statsModalView === 'players') statsModalTab = 'ALL';
+    $('#statsBody').scrollTop = 0;
+    renderStatsModal();
+    if (statsModalView === 'players') ensureModalPlayers(statsModalMatchId);
+  });
   $('#statsTabs').addEventListener('click', (event) => {
     const button = event.target.closest('[data-stats-tab]');
     if (!button || statsModalMatchId == null) return;
     statsModalTab = button.dataset.statsTab;
     $('#statsBody').scrollTop = 0;
     renderStatsModal();
-    if (statsModalTab === 'players') ensureModalPlayers(statsModalMatchId);
   });
+}
+
+function playerAvatar(player, className = 'stats-player-avatar') {
+  const avatar = el('span', className, player.num || player.name?.split(' ').map((part) => part[0]).slice(0, 2).join('') || '–');
+  avatar.setAttribute('aria-hidden', 'true');
+  return avatar;
+}
+
+function playerRating(value) {
+  const badge = el('strong', 'stats-player-rating', playerStatValue(value));
+  badge.dataset.grade = Number(value) >= 8 ? 'high' : Number(value) < 7 ? 'low' : 'normal';
+  return badge;
+}
+
+function statPercentage(item, side) {
+  const percentage = String(item[side] || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (percentage) return Math.min(100, Number(percentage[1].replace(',', '.')));
+  const total = Number(item[side + 'Total']);
+  return Math.min(100, total > 0 ? statNumber(item, side) / total * 100 : statNumber(item, side));
 }

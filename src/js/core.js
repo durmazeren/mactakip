@@ -4,6 +4,7 @@
 
 const POLL_MS = 10_000;
 const IDLE_POLL_MS = 60_000;          // başlamamış maçlar için
+const FALLBACK_RETRY_MS = 2 * 60_000; // yalnız animasyon açıkken veri yeniden denenir
 const MOMENTUM_RELOAD_MS = 60_000;    // atak grafiği kendi kendine güncellenmiyor
 const CATALOG_TTL_MS = 60_000;
 const MAX_ANIM = 12;
@@ -37,6 +38,7 @@ function save(key, value) {
 }
 
 const state = {
+  sofaConnection: { state: 'unknown', status: 0, retryAt: 0 },
   matches: loadMatches(),            // [{ id, anim }] — anim: false ise sadece şut ekranında
   events: new Map(),                 // id -> son event verisi
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
@@ -44,8 +46,9 @@ const state = {
   lastPoll: new Map(),               // id -> son sorgu zamanı (ms)
   tiles: new Map(),                  // id -> animasyon kutusu durumu
   period: 'ALL',
+  replaceMatchId: null,
   addMode: 'anim',                   // arama kutusundan seçilen maç nereye eklensin
-  catalog: { live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, loading: null },
+  catalog: { live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, lastAttemptAt: 0, date: null, loading: null, error: false, partial: false },
   leagueFilter: load('leagueFilter', null), // { id, name, category } veya null
   searchResults: [],
   lastShown: new Map(),              // şut ekranında yanıp sönme için önceki değerler
@@ -59,7 +62,7 @@ const state = {
 function loadMatches() {
   const saved = load('matches', null);
   if (Array.isArray(saved)) {
-    return saved.filter((m) => Number.isInteger(m?.id)).map((m) => ({ id: m.id, anim: !!m.anim }));
+    return saved.filter((m) => Number.isInteger(m?.id)).map((m) => ({ id: m.id, anim: !!m.anim, animationOnly: !!m.animationOnly }));
   }
   // Eski sürümden kalan liste: hepsi animasyonlu
   return load('selected', []).filter(Number.isInteger).map((id) => ({ id, anim: true }));
@@ -69,6 +72,11 @@ const saveTargets = () => save('targets', state.targets);
 const saveLayout = () => save('layout', state.layout);
 const findMatch = (id) => state.matches.find((m) => m.id === id);
 const animIds = () => state.matches.filter((m) => m.anim).map((m) => m.id);
+
+function animationOnlyEvent(id) {
+  return { id, _animationOnly: true, homeTeam: { name: `Maç #${id}` },
+    awayTeam: { name: '' }, status: { type: 'unknown' } };
+}
 
 function norm(s) {
   return (s || '').toLocaleLowerCase('tr')

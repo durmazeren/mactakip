@@ -20,6 +20,12 @@ jobs:
       exists: ${{ steps.v.outputs.exists }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
       - id: v
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,6 +57,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npx electron-builder ${{ matrix.target }} --publish never
       - uses: actions/upload-artifact@v4
         with:
@@ -66,6 +73,7 @@ jobs:
     needs: [check, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -75,7 +83,13 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           ls -la dist
-          cat > notes.md <<EOF
+          if [ -f "release-notes/${VERSION}.md" ]; then
+            cat "release-notes/${VERSION}.md" > notes.md
+          else
+            : > notes.md
+          fi
+          cat >> notes.md <<EOF
+
           ## Kurulum
 
           **Windows:** \`MacTakip-Setup-${VERSION}.exe\` dosyasını indir ve çift tıkla. Tek tıkla kurulur, masaüstüne **Maç Takip** simgesi gelir. Uygulama kuruluysa açılışta "Güncelle" düğmesi çıkar, ayrıca indirmen gerekmez.

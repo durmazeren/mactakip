@@ -2,17 +2,39 @@
 
 /* Animasyon kutuları: canlı animasyon (Sportradar) veya atak grafiği gösteren webview'ler */
 
-function createTile(id) {
+function autoReloadAllowed(tile) {
+  const connection = state.sofaConnection;
+  return !tile.reloadBlocked && !(connection?.state === 'blocked'
+    && (connection.status === 403 || connection.retryAt > Date.now()));
+}
+
+function scheduleTileRecovery(tile, webview) {
+  const delay = [15_000, 45_000, 120_000][tile.recoveryAttempts];
+  if (tile.webview !== webview || tile.recoveryTimer || delay == null || !autoReloadAllowed(tile)) return;
+  tile.recoveryAttempts++;
+  tile.recoveryTimer = setTimeout(() => {
+    tile.recoveryTimer = null;
+    if (tile.webview === webview && autoReloadAllowed(tile)) webview.reload();
+  }, delay);
+}
+
+function createTile(id, preview = false) {
   if (state.tiles.has(id)) return;
   const node = $('#tileTpl').content.firstElementChild.cloneNode(true);
-  const tile = { id, el: node, mode: null, webview: null, ready: false, trackerH: null, timers: [], fitTimer: null, ro: null };
+  const tile = { id, el: node, preview, mode: null, webview: null, ready: false, trackerH: null,
+    timers: [], fitTimer: null, recoveryTimer: null, recoveryAttempts: 0, reloadBlocked: false, ro: null };
+  $('.switch-match', node).hidden = !findMatch(id)?.anim;
+  $('.switch-match', node).addEventListener('click', () => {
+    if ($('#statsDialog').open) closeStatsModal(false);
+    openReplacePicker(id);
+  });
   $('.close', node).addEventListener('click', () => removeMatch(id));
   $('.to-shot', node).addEventListener('click', () => setAnim(id, false));
   $('.focus-btn', node).addEventListener('click', () => toggleFocus(id));
   $('.reset-btn', node).addEventListener('click', () => resetMatch(id));
   const head = $('.tile-head', node);
-  head.addEventListener('pointerdown', (e) => startDrag(e, tile));
-  head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFocus(id); });
+  head.addEventListener('pointerdown', (e) => { if (!tile.preview) startDrag(e, tile); });
+  head.addEventListener('dblclick', (e) => { if (!tile.preview && !e.target.closest('button')) toggleFocus(id); });
   for (const h of node.querySelectorAll('.rh')) {
     h.addEventListener('pointerdown', (e) => startResize(e, tile, h.dataset.dir));
   }
@@ -33,6 +55,7 @@ function destroyTile(id) {
   t.ro.disconnect();
   t.timers.forEach(clearInterval);
   clearTimeout(t.fitTimer);
+  clearTimeout(t.recoveryTimer);
   t.el.remove();
   state.tiles.delete(id);
 }
@@ -46,6 +69,10 @@ function setStage(tile, mode) {
   tile.ready = false;
   tile.timers.forEach(clearInterval);
   tile.timers = [];
+  clearTimeout(tile.recoveryTimer);
+  tile.recoveryTimer = null;
+  tile.recoveryAttempts = 0;
+  tile.reloadBlocked = false;
   const ph = $('.placeholder', stage);
   const ev = state.events.get(tile.id);
 
@@ -56,7 +83,7 @@ function setStage(tile, mode) {
       el('span', null, 'Animasyon maç başlayınca kendiliğinden açılır'),
     );
     $('.src', tile.el).textContent = '';
-    if (state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
+    if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
     return;
   }
 
@@ -75,25 +102,44 @@ function setStage(tile, mode) {
     wv.insertCSS(STAGE_CSS).catch(() => {});
     fitTile(tile);
   });
-  // Bağlantı koparsa veya sayfa çökerse kendini toparlasın
+  // Geçici hatada en fazla üç deneme; engellenen bağlantıya sürekli istek gönderme.
+  let loadFailed = false;
+  wv.addEventListener('did-start-loading', () => { loadFailed = false; });
+  wv.addEventListener('did-finish-load', () => {
+    if (tile.webview !== wv || loadFailed || tile.reloadBlocked) return;
+    tile.recoveryAttempts = 0;
+    clearTimeout(tile.recoveryTimer);
+    tile.recoveryTimer = null;
+  });
   wv.addEventListener('did-fail-load', (e) => {
-    if (e.isMainFrame && e.errorCode !== -3) setTimeout(() => { if (tile.webview === wv) wv.reload(); }, 5000);
+    if (!e.isMainFrame || e.errorCode === -3) return;
+    loadFailed = true;
+    scheduleTileRecovery(tile, wv);
   });
   wv.addEventListener('render-process-gone', () => {
-    setTimeout(() => { if (tile.webview === wv) wv.reload(); }, 2000);
+    loadFailed = true;
+    scheduleTileRecovery(tile, wv);
+  });
+  wv.addEventListener('did-navigate', (e) => {
+    if (tile.webview !== wv) return;
+    if (e.httpResponseCode === 429 || (mode === 'momentum' && e.httpResponseCode === 403)) {
+      tile.reloadBlocked = true;
+      clearTimeout(tile.recoveryTimer);
+      tile.recoveryTimer = null;
+    }
   });
   if (mode === 'tracker') {
     // Animasyon yoksa (lisans yok, küçük lig) atak grafiğine geç
     wv.addEventListener('page-title-updated', (e) => {
-      if (e.title === 'SR_NO_CONTENT') setStage(tile, 'momentum');
+      if (tile.webview === wv && e.title === 'SR_NO_CONTENT') setStage(tile, 'momentum');
     });
     wv.addEventListener('did-navigate', (e) => {
-      if (e.httpResponseCode >= 400) setStage(tile, 'momentum');
+      if (tile.webview === wv && e.httpResponseCode >= 400 && e.httpResponseCode !== 429) setStage(tile, 'momentum');
     });
   } else {
     // Atak grafiği açıldıktan sonra veri çekmiyor: canlı maçta dakikada bir yenile
     tile.timers.push(setInterval(() => {
-      if (tile.ready && isLive(state.events.get(tile.id))) wv.reload();
+      if (tile.ready && autoReloadAllowed(tile) && isLive(state.events.get(tile.id))) wv.reload();
     }, MOMENTUM_RELOAD_MS));
   }
   stage.append(wv);
@@ -101,7 +147,7 @@ function setStage(tile, mode) {
   // Widget içeriği yüklendikçe boyu değişiyor; birkaç saniyede bir yeniden sığdır
   tile.timers.push(setInterval(() => fitTile(tile), 3000));
   $('.src', tile.el).textContent = mode === 'tracker' ? 'Canlı animasyon' : 'Atak grafiği';
-  if (state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
+  if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
 }
 
 function scheduleFit(tile) {
@@ -136,7 +182,7 @@ function fitTile(tile) {
     })(${w}, ${h}, ${TRACKER_W})`).then((result) => {
       if (tile.webview !== wv || !result?.ch) return;
       tile.trackerH = result.ch;
-      if (state.layout.mode !== 'grid' || state.layout.focus || state.layout.arrange !== 'auto') return;
+      if (tile.preview || state.layout.mode !== 'grid' || state.layout.focus || state.layout.arrange !== 'auto') return;
       const should = useSideStats(tile.el.offsetWidth, tile.el.offsetHeight, result.ch);
       if (should !== tile.el.classList.contains('side-stats')) applyLayout(false);
     }).catch(() => { /* sayfa henüz hazır değil */ });
@@ -158,6 +204,16 @@ function updateTile(id) {
   const ev = state.events.get(id);
   if (!tile || !ev) return;
   const node = tile.el;
+  if (ev._animationOnly) {
+    $('.home-name', node).textContent = `Maç #${id}`;
+    $('.away-name', node).textContent = '';
+    $('.score', node).textContent = '–';
+    $('.minute', node).textContent = 'Animasyon';
+    $('.tile-foot', node).classList.add('no-stats');
+    $('.tile-foot', node).classList.add('animation-only');
+    if (tile.mode !== 'tracker') setStage(tile, 'tracker');
+    return;
+  }
   $('.home-name', node).textContent = teamName(ev.homeTeam);
   $('.away-name', node).textContent = teamName(ev.awayTeam);
   $('.home-name', node).title = ev.homeTeam?.name || '';
@@ -173,6 +229,7 @@ function updateTile(id) {
   const all = st?.ALL;
   const pair = (v) => (v ? `${v[0]} – ${v[1]}` : '–');
   $('.tile-foot', node).classList.toggle('no-stats', !!st?.none);
+  $('.tile-foot', node).classList.remove('animation-only');
   $('.shots', node).textContent = pair(all?.shots);
   $('.sot', node).textContent = pair(all?.sot);
   $('.corners', node).textContent = pair(all?.corners);

@@ -3,18 +3,32 @@
 /* Oyuncu verisi: kadro (lineups) + oyuncu şut istatistikleri + oyundan çıkanlar.
  * Canlı güncellemede yalnızca oyuncu hedefi olan maçlar için sorgulanır. */
 
+const playerLoads = new Map();
 const players = new Map(); // matchId -> { available, list, stats, out }
 
 const needsPlayers = (matchId) => state.targets.some((t) => t.kind === 'player' && t.matchId === matchId);
 
 async function loadPlayers(matchId, includeIncidents = true) {
+  const pending = playerLoads.get(matchId);
+  if (pending) {
+    if (includeIncidents && !pending.includeIncidents) return pending.promise.then(() => loadPlayers(matchId, true));
+    return pending.promise;
+  }
+  const promise = fetchPlayers(matchId, includeIncidents).finally(() => playerLoads.delete(matchId));
+  playerLoads.set(matchId, { promise, includeIncidents });
+  return promise;
+}
+
+async function fetchPlayers(matchId, includeIncidents) {
   const [lineups, inc] = await Promise.all([
     api(`event/${matchId}/lineups`).catch(() => undefined),
     includeIncidents ? api(`event/${matchId}/incidents`).catch(() => undefined) : null,
   ]);
   if (lineups === undefined) return players.get(matchId); // bağlantı hatası: eldekini koru
   const rec = { available: !!lineups, list: [], stats: new Map(), details: new Map(),
-    out: includeIncidents ? new Map() : (players.get(matchId)?.out || new Map()) };
+    loadedAt: Date.now(),
+    formation: { home: lineups?.home?.formation, away: lineups?.away?.formation },
+    out: includeIncidents && inc !== undefined ? new Map() : (players.get(matchId)?.out || new Map()) };
   for (const side of ['home', 'away']) {
     for (const p of lineups?.[side]?.players || []) {
       const id = p.player?.id;
@@ -25,6 +39,7 @@ async function loadPlayers(matchId, includeIncidents = true) {
         num: p.shirtNumber ?? p.jerseyNumber ?? p.player.jerseyNumber ?? '',
         side,
         starter: !p.substitute,
+        position: p.player.position || '',
       });
       const s = p.statistics;
       // İstatistiği olan oyuncu sahaya çıkmış demek; isabetli şutu yoksa alan hiç gelmiyor

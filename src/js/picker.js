@@ -82,42 +82,35 @@ function leagueLabel(league) {
 
 async function loadCatalog(force = false) {
   const c = state.catalog;
-  if (!force && Date.now() - c.loadedAt < CATALOG_TTL_MS) return;
+  const date = localDate();
   if (c.loading) return c.loading;
+  if (!force && c.date === date && Date.now() - c.loadedAt < CATALOG_TTL_MS) return;
+  if (!force && Date.now() - c.lastAttemptAt < 30_000) return;
+  c.lastAttemptAt = Date.now();
   c.loading = (async () => {
-    const date = localDate();
-    const [live, top, ...schedPages] = await Promise.all([
-      api('sport/football/events/live').catch(() => null),
-      api('config/top-unique-tournaments/TR/football').catch(() => null),
-      ...[1, 2, 3].map((page) => api(`sport/football/scheduled-tournaments/${date}/page/${page}`).catch(() => null)),
+    const [live, today] = await Promise.all([
+      api('sport/football/events/live').catch(() => undefined),
+      api(`sport/football/scheduled-events/${date}`).catch(() => undefined),
     ]);
-    c.live = (live?.events || []).sort(byPopularity);
-    const scheduled = schedPages.flatMap((page) => page?.scheduled || []);
-    c.leagues = collectLeagues(top?.uniqueTournaments || [], scheduled, c.live, []);
-    if (!c.loadedAt && typeof document !== 'undefined' && !$('#dropdown').hidden && document.activeElement?.id !== 'leagueFilter') {
-      renderDropdown();
+    c.error = live === undefined && today === undefined;
+    c.partial = !c.error && (live === undefined || today === undefined);
+    if (live !== undefined) c.live = (live?.events || []).sort(byPopularity);
+    if (today !== undefined) {
+      const seen = new Set(c.live.map((ev) => ev.id));
+      c.today = (today?.events || []).filter((ev) => ev?.id &&
+        localDate(new Date(ev.startTimestamp * 1000)) === date && !seen.has(ev.id) && seen.add(ev.id))
+        .sort((a, b) => a.startTimestamp - b.startTimestamp);
     }
-
-    // Bugünün maçları: popüler ligler + bugün maçı olan ilk ligler
-    const ids = [];
-    for (const u of top?.uniqueTournaments || []) ids.push(u.id);
-    for (const s of scheduled) {
-      const id = s.tournament?.uniqueTournament?.id;
-      if (id) ids.push(id);
-    }
-    const uniq = [...new Set(ids)].slice(0, 40);
-    const lists = await mapLimit(uniq, 6, (id) => api(`unique-tournament/${id}/scheduled-events/${date}`));
-    const seen = new Set(c.live.map((e) => e.id));
-    c.today = lists.flatMap((l) => l?.events || [])
-      .filter((e) => localDate(new Date(e.startTimestamp * 1000)) === date && !seen.has(e.id) && seen.add(e.id))
-      .sort((a, b) => a.startTimestamp - b.startTimestamp);
-    c.leagues = collectLeagues(top?.uniqueTournaments || [], scheduled, c.live, c.today);
-    c.loadedAt = Date.now();
-  })().finally(() => { c.loading = null; });
+    c.leagues = collectLeagues([], [], c.live, c.today);
+    c.date = date;
+    c.loadedAt = c.error ? 0 : Date.now();
+  })().finally(() => {
+    c.loading = null;
+    if (typeof document !== 'undefined' && !$('#dropdown').hidden && document.activeElement?.id !== 'leagueFilter') renderDropdown();
+  });
   return c.loading;
 }
 
-// Seçilen ligin kendi fikstürünü getirir; genel listedeki ilk 40 lig sınırına bağlı değildir.
 async function loadLeagueMatches(id, force = false) {
   if (!id) return;
   const c = state.catalog;
@@ -246,7 +239,9 @@ function renderDropdown() {
   dd.hidden = false;
   dd.replaceChildren();
 
-  dd.append(el('div', 'dd-hint', state.addMode === 'shot'
+  dd.append(el('div', 'dd-hint', state.replaceMatchId != null
+    ? 'Yeni maçı seç: eski maç şut ekranında ve hedeflerde kalır'
+    : state.addMode === 'shot'
     ? 'Tıkladığın maç sadece şut ekranına eklenir'
     : 'Tıkla: animasyon + şut ekranı  ·  "Şut" düğmesi: sadece şut ekranı'));
   renderLeagueFilter(dd);
@@ -264,13 +259,14 @@ function renderDropdown() {
   if (today.length) dd.append(el('div', 'dd-section', 'Bugün'), ...today.map(ddRow));
   if (upcoming.length) dd.append(el('div', 'dd-section', 'Yaklaşan (önümüzdeki 2 gün)'), ...upcoming.map(ddRow));
   if (found.length) dd.append(el('div', 'dd-section', 'Arama sonuçları'), ...found.map(ddRow));
+  if (c.partial) dd.append(el('div', 'dd-hint', 'Maç listesinin bir kısmı alınamadı; eldeki maçlar gösteriliyor.'));
   const leagueData = c.leagueData?.id === selectedLeagueId() ? c.leagueData : null;
   const leagueLoading = selectedLeagueId() && (!leagueData || !!leagueData.loading);
   if (leagueLoading) dd.append(el('div', 'dd-hint', 'Ligin yaklaşan maçları yükleniyor…'));
   if (selectedLeagueId() && leagueData?.error) dd.append(el('div', 'dd-hint', 'Lig maçları alınamadı. Aramayı yeniden açınca tekrar denenecek.'));
   else if (selectedLeagueId() && leagueData?.partial) dd.append(el('div', 'dd-hint', 'Bazı günlerin maçları alınamadı. Aramayı yeniden açınca tekrar denenecek.'));
   if (!live.length && !today.length && !upcoming.length && !found.length && !leagueLoading && !leagueData?.error) {
-    dd.append(el('div', 'dd-empty', c.loading || !c.loadedAt ? 'Maçlar yükleniyor…'
+    dd.append(el('div', 'dd-empty', c.loading ? 'Maçlar yükleniyor…' : c.error ? 'Sofascore maç listesi alınamıyor. Maç linki yapıştırarak animasyonu açabilirsin.' : !c.loadedAt ? 'Maçlar yükleniyor…'
       : raw ? selectedLeagueId() ? 'Bu ligde aramana uygun maç bulunamadı.' : 'Bulunamadı. Takım adını farklı yaz ya da Sofascore linkini yapıştır.'
         : selectedLeagueId() ? 'Bu ligde önümüzdeki 3 gün canlı veya yaklaşan maç yok.' : 'Maç bulunamadı.'));
   }
@@ -298,7 +294,7 @@ function ddRow(ev) {
     row.classList.add('selected');
   }
   // "Şut" düğmesi: sadece şut ekranına ekle
-  if (!m && state.addMode === 'anim') {
+  if (!m && state.addMode === 'anim' && state.replaceMatchId == null) {
     const shotBtn = el('button', 'dd-shot', 'Şut');
     shotBtn.title = 'Sadece şut ekranına ekle';
     shotBtn.addEventListener('mousedown', (e) => {
@@ -317,18 +313,28 @@ function ddRow(ev) {
 }
 
 function pickMatch(ev, anim) {
-  addMatch(ev.id, ev._linkOnly ? null : ev, anim);
+  const replaceId = state.replaceMatchId;
+  if (replaceId != null) replaceAnimation(replaceId, ev.id, ev._linkOnly ? null : ev);
+  else addMatch(ev.id, ev._linkOnly ? null : ev, anim, !!ev._linkOnly);
   $('#search').value = '';
   state.searchResults = [];
   closeDropdown();
   $('#search').blur();
 }
 
+function openReplacePicker(id) {
+  if (!findMatch(id)?.anim) return;
+  state.replaceMatchId = id;
+  openPicker('anim');
+}
+
 function updateSearchPlaceholder() {
   const s = $('#search');
   const league = state.leagueFilter;
   const prefix = selectedLeagueId() ? `${league.name || `Lig #${selectedLeagueId()}`} · ` : '';
-  s.placeholder = prefix + (state.addMode === 'shot'
+  s.placeholder = prefix + (state.replaceMatchId != null
+    ? 'Bu animasyona yeni maç seç veya link yapıştır…'
+    : state.addMode === 'shot'
     ? 'Şut ekranına maç ekle: takım ara veya link yapıştır…'
     : 'Takım ara veya Sofascore maç linki yapıştır…');
   s.classList.toggle('filtered', !!selectedLeagueId());
@@ -345,10 +351,9 @@ function openPicker(mode) {
 
 function closeDropdown() {
   $('#dropdown').hidden = true;
-  if (state.addMode !== 'anim') {
-    state.addMode = 'anim';
-    updateSearchPlaceholder();
-  }
+  state.replaceMatchId = null;
+  state.addMode = 'anim';
+  updateSearchPlaceholder();
 }
 
 function initPicker() {

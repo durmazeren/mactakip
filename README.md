@@ -31,6 +31,8 @@ Tek gereksinim **Node.js** (LTS sürümü). Windows'ta yoksa `Baslat-Windows.bat
 
 Komut satırından: `npm install` ve ardından `npm start`.
 
+Uygulama aynı veri klasörüyle bir kez çalışır. İkinci kez açılırsa mevcut pencereye dönülür; ikinci bir veri sorgulama döngüsü başlamaz.
+
 ## Kurulum dosyası (Node.js'siz bilgisayarlar)
 
 Node.js kurmadan dağıtmak için kurulum dosyası üret:
@@ -56,11 +58,13 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - **Odak modu:** kutudaki ⤢ düğmesi (veya başlığa çift tıklama) o maçı büyütür; diğerleri yanda/altta küçülür ama odaktakinin en az yarı boyunda kalır. Tekrar ⤡ ya da Esc ile çıkılır.
 - **Serbest:** kutuları başlığından tutup sürükle; dört kenarından ve dört köşesinden boyutlandır. Alanın kenarlarına, yarım / üçte bir / çeyrek çizgilerine ve diğer kutulara yapışır (yapıştığı yerde kılavuz çizgisi görünür). "Düzeni sıfırla" ızgaraya döner.
 - **Tam ekran:** üst bardaki ⛶ düğmesi veya **F** tuşu; üst bar ve şut ekranı gizlenir. Esc veya F ile çıkılır.
+- Başlığın solundaki **⇄** ile o kutudaki maçı değiştir; eski maç şut ekranında ve hedeflerde kalır. Logolar takım adlarının yanındadır.
 - Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır; animasyonu olmayan veya biten maçlarda atak grafiği gösterilir.
 
 **Şut ekranı**
 - Her maç için toplam şut, isabetli şut ve korner, her biri tek satırda; "Maç / 1Y / 2Y" ile devre bazında.
-- Karta tıkla: maçın tüm istatistikleri açılır (Maç / 1. yarı / 2. yarı sekmeleri: topla oynama, xG, şut türleri, paslar, mücadeleler, savunma, kaleci) ve **Oyuncular** sekmesinde her oyuncunun ayrıntılı istatistikleri. Esc ya da ✕ ile kapanır.
+- Karta tıkla: mevcut maç istatistikleri sağda dikey bir panelde açılır; solda maçın açık animasyonu büyür. Çubuklar, topla oynama grafiği ve yüzde halkalarıyla karşılaştırma yapılır. Panelin altındaki oklarla şut ekranındaki maçlar arasında geçilir. Esc ya da ✕ ile kapanır.
+- **Oyuncular** sekmesinde kadro ve oyuncu istatistikleri görünür. Diziliş bilgisi varsa ilk 11 sahaya yerleşir; yoksa liste gösterilir. Oyuncuya tıkla veya detayın altındaki oklarla oyuncu değiştir. Forma numaralarıyla gösterilir; ek fotoğraf ve şut haritası isteği gönderilmez. Oyuncu verisi önbellekte yoksa bu sekme ilk açıldığında bir kadro isteği yapılır.
 - ⚙ ile kartta hangi istatistiklerin görüneceği seçilir (ör. korneri kapat) ve sıralama ayarlanır:
   - **Elle:** kartın üstünde basılı tut ve sürükle. Sıra animasyon ızgarasına da yansır (Otomatik moddayken sürüklersen Elle'ye geçer).
   - **Otomatik:** hedefli canlı maçlar üstte, sonra canlı, başlamamış ve en altta küçülmüş halde biten maçlar.
@@ -80,10 +84,22 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 **Güncelleme**
 - Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta "Güncelle" → "Yeniden başlat ve kur". Mac'te yeni sürümün indirme sayfası açılır.
 
+**SofaScore bağlantısı**
+- 403 uyarısı çıkarsa **SofaScore'u aç** düğmesine bas. Site açıldıktan sonra Maç Takip'e dönüp **Bağlantıyı kontrol et** düğmesine bir kez bas. Doğrulama istenirse sitede kendin tamamla.
+- Erişim reddedildiğinde otomatik veri istekleri bekletilir. Ağ değiştirirsen aynı kontrol düğmesiyle bağlantıyı yeniden deneyebilirsin.
+
 ## Yeni sürüm yayınlama
 
 `package.json` içindeki `version` alanını artırıp (ör. 1.1.0 → 1.2.0) `main`'e push et. GitHub Actions Windows ve Mac kurulum dosyalarını derleyip Releases'a yükler; kurulu uygulamalar açılışta yeni sürümü görür. Sürüm artırılmadan yapılan push'lar yeni sürüm oluşturmaz.
 
 ## Teknik not
 
+Yayın öncesinde ve her iki işletim sisteminde testler çalışır. Test veya derleme başarısızsa sürüm yayınlanmaz. Sürüme ait değişiklikler `release-notes/<sürüm>.md` dosyasından yayın notlarına eklenir.
+
+Animasyon yükleme hatalarında en fazla üç deneme yapılır: 15, 45 ve 120 saniye arayla. Başarılı yüklemede sayaç sıfırlanır. API bağlantısı engelliyken otomatik animasyon yenilemesi bekletilir; animasyon sayfasının kendi 403/429 yanıtında da yenileme durur. Veri istekleri ve animasyonun iç servis bağlantıları farklıdır; uygulama animasyon sağlayıcısının kendi iç istek sıklığını yönetmez.
+
 Electron uygulaması (`src/`). Veri Sofascore'un resmi olmayan uç noktalarından gelir (`/api/v1/event/{id}`, `/statistics`, `/live-match-tracker`); istekler Electron'un ağ katmanından yapılır, normal sunucu istekleri Sofascore tarafından engelleniyor. Sofascore bu uç noktaları değiştirirse güncelleme gerekebilir.
+
+Veri ve animasyon `persist:sofa` oturumunu paylaşır. Yinelenen istekler birleştirilir; aynı anda en fazla iki veri isteği gönderilir. Lig ayarları ve fikstür kısa süre önbellekte tutulur. 403 yanıtından sonra otomatik veri istekleri kullanıcı bağlantıyı kontrol edene kadar durur; 429 yanıtında sunucunun `Retry-After` süresine uyulur. Ağ değiştirildikten sonra uyarıdaki **Bağlantıyı kontrol et** düğmesi tek istekle erişimi sınar. **SofaScore'u aç**, aynı uygulama oturumunda siteyi açar; doğrulama istenirse kullanıcı tamamlar. Bu davranış IP engelini kaldırmayı garanti etmez.
+
+Maç seçici genel liste için yalnızca canlı maçlar ve günün toplu fikstürünü ister; ayrı ayrı 40 lig sorgulanmaz. Fikstür beş dakika önbellekte tutulur. Belirli ligin önümüzdeki üç günlük fikstürü ancak kullanıcı ligi seçtiğinde istenir. Maç istatistik paneli yeni istatistik isteği veya ikinci bir animasyon bağlantısı açmaz; mevcut animasyon büyütülür. Yalnız şut ekranındaki maç için panel açıkken tek bir geçici animasyon açılır.

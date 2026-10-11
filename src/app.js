@@ -2,7 +2,7 @@
 
 /* Maç ekleme/çıkarma, canlı güncelleme ve başlangıç. Yardımcılar js/ altındaki dosyalarda. */
 
-async function addMatch(id, ev, anim) {
+async function addMatch(id, ev, anim, fromLink = false) {
   const existing = findMatch(id);
   if (existing) {
     if (anim && !existing.anim) setAnim(id, true);
@@ -13,18 +13,78 @@ async function addMatch(id, ev, anim) {
     setStatus(`Animasyon en fazla ${MAX_ANIM} maç; bu maç sadece şut ekranına eklendi`);
     anim = false;
   }
+  let animationOnly = false;
   if (!ev) {
-    const res = await api(`event/${id}`).catch(() => null);
-    if (!res?.event) { setStatus(`Maç bulunamadı (#${id})`); return; }
-    ev = res.event;
+    const res = await api(`event/${id}`).catch(() => undefined);
+    if (res === undefined && anim && fromLink) {
+      // Maç JSON'u engellense de Sofascore'un animasyon webview'i açılabiliyor.
+      ev = animationOnlyEvent(id);
+      animationOnly = true;
+      state.lastPoll.set(id, Date.now());
+    } else if (!res?.event) {
+      setStatus(res === undefined ? 'Sofascore maç verisi alınamadı' : `Maç bulunamadı (#${id})`);
+      return;
+    } else ev = res.event;
   }
   if (findMatch(id)) return; // beklerken eklendiyse
-  state.matches.push({ id, anim });
+  state.matches.push({ id, anim, animationOnly });
   state.events.set(id, ev);
   saveMatches();
   if (anim) createTile(id);
   refresh(true);
+  if (animationOnly) {
+    setStatus(`Maç #${id}: yalnız animasyon açık; skor ve istatistik verisi alınamıyor`);
+    return;
+  }
   pollOne(id).then(() => renderShotList());
+}
+
+async function replaceAnimation(oldId, newId, ev) {
+  const old = findMatch(oldId);
+  if (!old?.anim || oldId === newId) return;
+  let next = findMatch(newId);
+  if (!next && state.matches.length >= MAX_TOTAL) {
+    setStatus(`En fazla ${MAX_TOTAL} maç eklenebilir`);
+    return;
+  }
+  if (!ev && !state.events.has(newId)) {
+    const result = await api(`event/${newId}`).catch(() => undefined);
+    if (result === undefined) { setStatus('Maç verisi alınamadı: Sofascore erişimini kontrol et'); return; }
+    if (!result?.event) { setStatus(`Maç bulunamadı (#${newId})`); return; }
+    ev = result.event;
+  }
+  if (!findMatch(oldId)?.anim) return;
+  next = findMatch(newId);
+  if (statsModalMatchId != null) closeStatsModal(false);
+  const oldIndex = state.matches.indexOf(old);
+  const nextIndex = next ? state.matches.indexOf(next) : -1;
+  if (next?.anim) {
+    [state.matches[oldIndex], state.matches[nextIndex]] = [next, old];
+    const oldFree = state.layout.free[oldId];
+    state.layout.free[oldId] = state.layout.free[newId];
+    state.layout.free[newId] = oldFree;
+  } else {
+    old.anim = false;
+    if (next) state.matches.splice(nextIndex, 1);
+    else next = { id: newId, anim: false, animationOnly: false };
+    next.anim = true;
+    state.matches.splice(state.matches.indexOf(old), 0, next);
+    state.layout.free[newId] = state.layout.free[oldId];
+    delete state.layout.free[oldId];
+    destroyTile(oldId);
+    if (ev) state.events.set(newId, ev);
+    createTile(newId);
+  }
+  if (state.layout.focus === oldId) state.layout.focus = newId;
+  else if (state.layout.focus === newId && old.anim) state.layout.focus = oldId;
+  state.layout.z = nextIndex >= 0 && old.anim
+    ? state.layout.z.map((id) => id === oldId ? newId : id === newId ? oldId : id)
+    : state.layout.z.filter((id) => id !== newId).map((id) => id === oldId ? newId : id);
+  saveMatches();
+  saveLayout();
+  refresh(true);
+  if (ev) state.events.set(newId, ev);
+  if (!state.lastPoll.has(newId)) pollOne(newId).then(() => renderShotList());
 }
 
 function setAnim(id, anim) {
@@ -38,6 +98,7 @@ function setAnim(id, anim) {
 }
 
 function removeMatch(id) {
+  if (statsModalMatchId === id) closeStatsModal(false);
   state.matches = state.matches.filter((m) => m.id !== id);
   saveMatches();
   destroyTile(id);
@@ -76,7 +137,8 @@ async function resetMatch(id) {
   renderShotList();
   buttons.forEach((b) => b.classList.remove('spinning'));
   const ev = state.events.get(id);
-  setStatus(ok ? `${teamName(ev?.homeTeam)} – ${teamName(ev?.awayTeam)} yenilendi` : 'Yenilenemedi, bağlantıyı kontrol et');
+  setStatus(ok ? `${teamName(ev?.homeTeam)} – ${teamName(ev?.awayTeam)} yenilendi`
+    : ev?._animationOnly ? 'Animasyon açık; skor ve istatistikler hâlâ alınamıyor' : 'Yenilenemedi, bağlantıyı kontrol et');
 }
 
 function refresh(animate) {
@@ -94,6 +156,7 @@ function refresh(animate) {
 
 // Gereksiz istek atmamak için: biten maç bir kez, başlamamış maç dakikada bir sorgulanır
 function needsPoll(id) {
+  if (findMatch(id)?.animationOnly) return Date.now() - (state.lastPoll.get(id) || 0) >= FALLBACK_RETRY_MS;
   const ev = state.events.get(id);
   const last = state.lastPoll.get(id) || 0;
   if (!last) return true;
@@ -105,26 +168,31 @@ function needsPoll(id) {
 }
 
 async function pollOne(id) {
+  const animationOnly = !!findMatch(id)?.animationOnly;
   const [evRes, stRes] = await Promise.all([
     api(`event/${id}`).catch(() => undefined),
-    api(`event/${id}/statistics`).catch(() => undefined),
-    needsPlayers(id) ? loadPlayers(id) : null,
+    animationOnly ? null : api(`event/${id}/statistics`).catch(() => undefined),
+    !animationOnly && needsPlayers(id) ? loadPlayers(id) : null,
   ]);
   if (!findMatch(id)) return true;
-  if (evRes?.event) state.events.set(id, evRes.event);
-  if (stRes) {
+  if (evRes?.event) {
+    state.events.set(id, evRes.event);
+    const match = findMatch(id);
+    if (match?.animationOnly) { match.animationOnly = false; saveMatches(); }
+  }
+  if (!animationOnly && stRes) {
     state.statsRaw.set(id, stRes);
     state.stats.set(id, parseStats(stRes));
   }
-  else if (stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
+  else if (!animationOnly && stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
     state.statsRaw.delete(id);
     state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
   }
-  if (evRes !== undefined) state.lastPoll.set(id, Date.now());
+  if (animationOnly || evRes !== undefined) state.lastPoll.set(id, Date.now());
   updateTile(id);
   checkAlerts(id);
   renderStatsModalIfOpen(id);
-  return evRes !== undefined && stRes !== undefined;
+  return animationOnly ? !!evRes?.event : evRes !== undefined && stRes !== undefined;
 }
 
 let polling = false;
@@ -211,10 +279,15 @@ function initFullscreen() {
   });
   // F: tam ekran. Animasyonun içindeyken de çalışsın diye ana süreç de kısayolu iletiyor.
   document.addEventListener('keydown', (e) => {
+    if ($('#statsDialog').open) {
+      if (e.key === 'Escape') { e.preventDefault(); closeStatsModal(); }
+      return;
+    }
     if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey
       && !e.target.closest('input, select, textarea')) toggleFullscreen();
   });
   window.appShortcut.on((key) => {
+    if ($('#statsDialog').open) { if (key === 'Escape') closeStatsModal(); return; }
     if (key === 'f') toggleFullscreen();
     if (key === 'Escape' && state.layout.focus) {
       state.layout.focus = null;
@@ -226,7 +299,55 @@ function initFullscreen() {
 
 /* ---------- Başlangıç ---------- */
 
+function initConnection() {
+  const notice = $('#sofaConnection');
+  const text = $('#sofaConnectionText');
+  const retry = $('#sofaRetry');
+  let connection = { state: 'unknown' };
+  let checking = false;
+  const render = () => {
+    notice.hidden = connection.state !== 'blocked';
+    if (notice.hidden) return;
+    const wait = Math.max(0, Math.ceil((connection.retryAt - Date.now()) / 60_000));
+    text.textContent = connection.status === 429
+      ? `SofaScore istek sınırı. Otomatik istekler ${wait || 1} dakika bekliyor.`
+      : 'SofaScore erişimi reddetti (403). Otomatik istekler durduruldu; siteyi açıp bağlantıyı kontrol edebilirsin.';
+    retry.disabled = checking || (connection.status === 429 && connection.retryAt > Date.now());
+  };
+  const update = (value) => { connection = value; state.sofaConnection = value; render(); };
+  window.sofa.onConnection(update);
+  window.sofa.connection().then(update);
+  setInterval(render, 1000);
+  $('#sofaOpen').addEventListener('click', () => window.sofa.open());
+  retry.addEventListener('click', async () => {
+    if (checking) return;
+    checking = true;
+    retry.disabled = true;
+    retry.textContent = 'Kontrol ediliyor…';
+    try {
+      const result = await window.sofa.retry();
+      update(result);
+      if (result.state === 'connected' && !result.error) {
+        state.catalog.loadedAt = 0;
+        state.lastPoll.clear();
+        const pickerOpen = !$('#dropdown').hidden;
+        await Promise.all([pollAll(), pickerOpen ? loadCatalog(true) : null,
+          pickerOpen ? loadLeagueMatches(selectedLeagueId(), true) : null]);
+        if (!$('#dropdown').hidden) renderDropdown();
+        const latest = await window.sofa.connection();
+        update(latest);
+        if (latest.state === 'connected') setStatus('SofaScore bağlantısı yeniden kuruldu');
+      } else if (result.error) setStatus(result.error);
+    } finally {
+      checking = false;
+      retry.textContent = 'Bağlantıyı kontrol et';
+      render();
+    }
+  });
+}
+
 function init() {
+  initConnection();
   initPicker();
   initLayout();
   initUpdates();
@@ -243,13 +364,15 @@ function init() {
   });
 
   // Kayıtlı liste ağ hatasında korunur; veri gelmeyen maç sonraki turda tekrar denenir.
-  for (const m of state.matches) if (m.anim) createTile(m.id);
+  for (const m of state.matches) {
+    if (m.animationOnly) state.events.set(m.id, animationOnlyEvent(m.id));
+    if (m.anim) createTile(m.id);
+  }
   refresh(false);
   if (state.matches.length) {
     setStatus('Kayıtlı maçlar yükleniyor…');
     pollAll();
   }
-  setTimeout(() => loadCatalog(), 3000);
   setInterval(pollAll, POLL_MS);
   setInterval(tickMinutes, 1000);
 }

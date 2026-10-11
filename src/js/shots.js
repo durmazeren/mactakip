@@ -80,11 +80,13 @@ function ensureCard(id) {
   card.addEventListener('click', (event) => {
     if (performance.now() - lastPointerUp < 500) return;
     if (event.target.closest('button, input, select, textarea, a, label, .targets, .sc-form-host, .goal-overlay')) return;
+    if (state.events.get(id)?._animationOnly) return;
     openStatsModal(id);
   });
   title.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
+    if (state.events.get(id)?._animationOnly) return;
     openStatsModal(id);
   });
   $('#shotList').append(card);
@@ -136,6 +138,22 @@ function updateCard(id) {
     c.statsBox.hidden = true;
     c.none.hidden = false;
     c.none.textContent = 'Veri bekleniyor · ↻ ile yeniden dene';
+    c.targets.hidden = true;
+    return;
+  }
+  if (ev._animationOnly) {
+    c.el.classList.remove('live');
+    c.meta.classList.remove('live');
+    c.homeN.textContent = `Maç #${id}`;
+    c.awayN.textContent = '';
+    c.score.textContent = '–';
+    c.meta.textContent = 'Yalnız animasyon';
+    c.title.title = 'Sofascore skor ve istatistik verisi alınamıyor';
+    c.title.setAttribute('aria-label', `Maç #${id}: yalnız animasyon`);
+    c.targetBtn.disabled = true;
+    c.statsBox.hidden = true;
+    c.none.hidden = false;
+    c.none.textContent = 'Skor ve istatistikler alınamıyor · ↻ ile yeniden dene';
     c.targets.hidden = true;
     return;
   }
