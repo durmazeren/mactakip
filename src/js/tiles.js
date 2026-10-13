@@ -75,6 +75,7 @@ function setStage(tile, mode) {
   tile.reloadBlocked = false;
   const ph = $('.placeholder', stage);
   const ev = state.events.get(tile.id);
+  $('.board', stage)?.remove();
 
   if (mode === 'wait') {
     ph.hidden = false;
@@ -88,6 +89,17 @@ function setStage(tile, mode) {
   }
 
   ph.hidden = true;
+  if (mode === 'board') {
+    stage.append(buildBoard());
+    renderBoard(tile);
+    loadBoardGraph(tile);
+    tile.timers.push(setInterval(() => {
+      if (isLive(state.events.get(tile.id))) loadBoardGraph(tile);
+    }, BOARD_GRAPH_MS));
+    $('.src', tile.el).textContent = 'Skor paneli';
+    if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
+    return;
+  }
   const wv = document.createElement('webview');
   // Animasyonlar ortak oturumda (önbellek paylaşılır) ve sayfa içinden ölçeklenir.
   // Atak grafiği boyutunu pencere genişliğinden hesapladığı için sayfa yakınlaştırması
@@ -131,10 +143,10 @@ function setStage(tile, mode) {
   if (mode === 'tracker') {
     // Animasyon yoksa (lisans yok, küçük lig) atak grafiğine geç
     wv.addEventListener('page-title-updated', (e) => {
-      if (tile.webview === wv && e.title === 'SR_NO_CONTENT') setStage(tile, 'momentum');
+      if (tile.webview === wv && e.title === 'SR_NO_CONTENT') setStage(tile, fallbackMode(tile.id));
     });
     wv.addEventListener('did-navigate', (e) => {
-      if (tile.webview === wv && e.httpResponseCode >= 400 && e.httpResponseCode !== 429) setStage(tile, 'momentum');
+      if (tile.webview === wv && e.httpResponseCode >= 400 && e.httpResponseCode !== 429) setStage(tile, fallbackMode(tile.id));
     });
   } else {
     // Atak grafiği açıldıktan sonra veri çekmiyor: canlı maçta dakikada bir yenile
@@ -148,6 +160,115 @@ function setStage(tile, mode) {
   tile.timers.push(setInterval(() => fitTile(tile), 3000));
   $('.src', tile.el).textContent = mode === 'tracker' ? 'Canlı animasyon' : 'Atak grafiği';
   if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
+}
+
+/* Basketbolda animasyon yoksa (küçük lig) veya maç bittiyse atak grafiği yerine
+ * kendi skor panelimiz: skor, çeyrek saati, periyot skorları ve sayı farkı grafiği.
+ * Grafik verisi (event/{id}/graph) canlı maçta dakikada bir istenir. */
+const BOARD_GRAPH_MS = 60_000;
+const fallbackMode = (id) => isBasket(id) ? 'board' : 'momentum';
+
+function buildBoard() {
+  const board = el('div', 'board');
+  const top = el('div', 'b-top');
+  for (const side of ['home', 'away']) {
+    const team = el('div', `b-team ${side}`);
+    const logo = el('img', 'b-logo');
+    logo.alt = '';
+    team.append(logo, el('span', 'b-name'));
+    top.append(team);
+    if (side === 'home') {
+      const mid = el('div', 'b-mid');
+      mid.append(el('b', 'b-score'), el('span', 'b-clock'));
+      top.append(mid);
+    }
+  }
+  board.append(top, el('table', 'b-periods'), el('div', 'b-graph'),
+    el('div', 'b-note', 'Bu maç için canlı animasyon yok · skor paneli'));
+  return board;
+}
+
+function renderBoard(tile) {
+  const board = $('.board', tile.el);
+  const ev = state.events.get(tile.id);
+  if (!board || !ev) return;
+  for (const side of ['home', 'away']) {
+    const team = ev[`${side}Team`];
+    const box = $(`.b-team.${side}`, board);
+    $('.b-name', box).textContent = team?.name || '';
+    const logo = $('.b-logo', box);
+    if (team?.id && !logo.getAttribute('src')) logo.src = LOGO_URL(team.id);
+  }
+  $('.b-score', board).textContent = scoreText(ev);
+  $('.b-clock', board).textContent = minuteText(ev);
+  $('.b-clock', board).classList.toggle('live', isLive(ev));
+
+  const total = ev.time?.totalPeriodCount || 4;
+  let count = total;
+  while (count < 9 && ev.homeScore?.[`period${count + 1}`] != null) count++;
+  const head = (n) => n > total ? `UZ${n - total > 1 ? n - total : ''}` : `${n}${total === 2 ? 'Y' : 'Ç'}`;
+  const row = (cells, tag = 'td') => {
+    const tr = el('tr');
+    cells.forEach(([text, cls]) => tr.append(el(tag, cls || null, text)));
+    return tr;
+  };
+  const periods = Array.from({ length: count }, (_, i) => i + 1);
+  $('.b-periods', board).replaceChildren(
+    row([[''], ...periods.map((n) => [head(n)]), ['Toplam', 'total']], 'th'),
+    ...['home', 'away'].map((side) => row([[teamName(ev[`${side}Team`]), 'team'],
+      ...periods.map((n) => [String(ev[`${side}Score`]?.[`period${n}`] ?? '–')]),
+      [ev.status?.type === 'notstarted' ? '–' : String(ev[`${side}Score`]?.current ?? 0), 'total']])),
+  );
+  drawBoardGraph(tile);
+}
+
+async function loadBoardGraph(tile) {
+  const res = await api(`event/${tile.id}/graph`).catch(() => undefined);
+  if (state.tiles.get(tile.id) !== tile || tile.mode !== 'board' || !res) return;
+  tile.graph = res;
+  drawBoardGraph(tile);
+}
+
+// Sayı farkı: ev sahibi öndeyse yukarı, deplasman öndeyse aşağı çubuk
+function drawBoardGraph(tile) {
+  const box = $('.board .b-graph', tile.el);
+  if (!box) return;
+  const g = tile.graph;
+  const pts = g?.graphPoints || [];
+  if (!pts.length) {
+    box.replaceChildren(el('span', 'b-graph-empty', 'Sayı farkı grafiği maç ilerledikçe görünür'));
+    return;
+  }
+  const period = g.periodTime || 10;
+  const ot = g.overtimeLength || 5;
+  const regular = period * (g.periodCount || 4);
+  const minutes = Math.max(regular + (g.overtimeCount || 0) * ot, pts[pts.length - 1].minute);
+  const max = Math.max(5, ...pts.map((p) => Math.abs(p.value)));
+  const W = minutes * 10, H = 100, mid = H / 2;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const add = (tag, attrs) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.append(node);
+  };
+  for (let m = period; m < minutes; m += m < regular ? period : ot) {
+    add('line', { x1: m * 10, x2: m * 10, y1: 0, y2: H, class: 'b-div' });
+  }
+  add('line', { x1: 0, x2: W, y1: mid, y2: mid, class: 'b-axis' });
+  for (const p of pts) {
+    const h = Math.abs(p.value) / max * (mid - 4);
+    if (!h) continue;
+    add('rect', { x: (p.minute - 1) * 10 + 1, width: 8, y: p.value > 0 ? mid - h : mid, height: h,
+      class: p.value > 0 ? 'home' : 'away' });
+  }
+  const ev = state.events.get(tile.id);
+  const last = pts[pts.length - 1].value;
+  const leader = last > 0 ? teamName(ev?.homeTeam) : last < 0 ? teamName(ev?.awayTeam) : null;
+  box.replaceChildren(svg, el('span', 'b-graph-label',
+    `${leader ? `Fark: ${leader} +${Math.abs(last)}` : 'Fark: eşit'} · en büyük fark ${max}`));
 }
 
 function scheduleFit(tile) {
@@ -247,8 +368,9 @@ function updateTile(id) {
     else $('.placeholder b', node).textContent = `Başlama ${minuteText(ev)}`;
   } else if (isOver(ev)) {
     // Maç bitince animasyon boş saha gösteriyor; maçın özeti olarak atak grafiğine geç
-    if (tile.mode !== 'momentum') setStage(tile, 'momentum');
+    if (tile.mode !== fallbackMode(id)) setStage(tile, fallbackMode(id));
+    else if (tile.mode === 'board') renderBoard(tile);
   } else if (tile.mode === 'wait' || tile.mode === null) {
     setStage(tile, 'tracker');
-  }
+  } else if (tile.mode === 'board') renderBoard(tile);
 }

@@ -134,6 +134,7 @@ async function resetMatch(id) {
   const tile = state.tiles.get(id);
   if (tile) {
     if (tile.webview) { tile.webview.remove(); tile.webview = null; }
+    tile.graph = null;
     tile.mode = null; // updateTile animasyonu baştan kurar
   }
   const ok = await pollOne(id);
@@ -228,6 +229,7 @@ function tickMinutes() {
     const text = minuteText(ev);
     const t = state.tiles.get(id);
     if (t) $('.minute', t.el).textContent = text;
+    if (t?.mode === 'board') $('.b-clock', t.el).textContent = text;
     const card = shotCards.get(id);
     if (card && card.meta.textContent !== text) card.meta.textContent = text;
   }
