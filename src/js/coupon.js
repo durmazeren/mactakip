@@ -7,8 +7,17 @@
  * Alt: değer baremi geçtiği an yattı; periyot bitince altta kaldıysa tuttu.
  * Oyuncu oyundan çıkarsa (değişiklik / kırmızı kart) hedefi o an kapanır. */
 
-const TARGET_STATS = { shots: 'şut', sot: 'isabetli şut', corners: 'korner' };
-const TARGET_PERIODS = { ALL: 'Maç', '1ST': '1. yarı', '2ND': '2. yarı' };
+const TARGET_STATS = { shots: 'şut', sot: 'isabetli şut', corners: 'korner',
+  points: 'sayı', threes: "3'lük", rebounds: 'ribaund', assists: 'asist', turnovers: 'top kaybı' };
+const TARGET_PERIODS = { ALL: 'Maç', '1ST': '1. yarı', '2ND': '2. yarı',
+  Q1: '1. çeyrek', Q2: '2. çeyrek', Q3: '3. çeyrek', Q4: '4. çeyrek' };
+/* Basketbol: maç ve 2. yarı uzatmalar dahil, çeyrekler uzatma hariç (bahis sitelerinin
+ * yaygın kuralı). Sayı skordan, diğer takım istatistikleri yalnız maç sonu için. */
+const BASKET_TEAM_STATS = [['points', 'Sayı'], ['threes', "3'lük isabet"], ['rebounds', 'Ribaund'],
+  ['assists', 'Asist'], ['turnovers', 'Top kaybı']];
+const BASKET_PLAYER_STATS = [['points', 'Sayı'], ['rebounds', 'Ribaund'], ['assists', 'Asist'], ['threes', "3'lük isabet"]];
+const BASKET_PERIODS = [['ALL', 'Maç sonu (uzatma dahil)'], ['1ST', '1. yarı'], ['2ND', '2. yarı (uzatma dahil)'],
+  ['Q1', '1. çeyrek'], ['Q2', '2. çeyrek'], ['Q3', '3. çeyrek'], ['Q4', '4. çeyrek (uzatma hariç)']];
 const TARGET_STATE_TEXT = {
   won: 'Tuttu ✓', lost: 'Yattı ✗', push: 'İade', live: 'Devam', wait: 'Başlamadı', nodata: 'Veri yok',
 };
@@ -29,17 +38,29 @@ function targetLabel(t) {
   return `${sideName(t)} ${TARGET_STATS[t.stat]} ${t.line} ${dir}${period}`;
 }
 
-// Hedefin periyodu bitti mi? (Bahisler normal süreye göre: uzatmalar sayılmaz)
+// Hedefin periyodu bitti mi? (Futbol: normal süre; basketbol: yukarıdaki kural)
 function periodOver(ev, period) {
   const st = ev?.status;
   if (!st) return false;
   if (st.type === 'finished') return true;
   if (st.type !== 'inprogress') return false;
+  if (eventSport(ev) === 'basketball') {
+    const done = basketQuartersDone(ev);
+    if (period === '1ST') return done >= 2;
+    const q = /^Q([1-4])$/.exec(period);
+    return q ? done >= Number(q[1]) : false;
+  }
   if (period === '1ST') return st.code !== 6;
   return ![6, 31, 7].includes(st.code); // Maç ve 2. yarı: 90 dakika bitince
 }
 
 function teamValue(t) {
+  const ev = state.events.get(t.matchId);
+  if (t.stat === 'points') {
+    const pair = basketPoints(ev, t.period);
+    if (!pair) return ev ? null : undefined;
+    return t.side === 'home' ? pair[0] : t.side === 'away' ? pair[1] : pair[0] + pair[1];
+  }
   const st = state.stats.get(t.matchId);
   if (!st) return undefined;
   if (st.none) return null;
@@ -217,8 +238,14 @@ function openTargetForm(matchId) {
   }), String(matchId));
   const sideSel = select([['home', ''], ['away', ''], ['total', 'Toplam (iki takım)']], 'home');
   const playerSel = el('select');
-  const statSel = select([['shots', 'Toplam şut'], ['sot', 'İsabetli şut'], ['corners', 'Korner']], 'sot');
-  const periodSel = select([['ALL', 'Maç sonu'], ['1ST', '1. yarı'], ['2ND', '2. yarı']], 'ALL');
+  const statSel = el('select');
+  const periodSel = el('select');
+  const fillSelect = (s, opts, fallback) => {
+    const old = s.value;
+    s.replaceChildren(...opts.map(([v, text]) => Object.assign(el('option', null, text), { value: v })));
+    s.value = opts.some(([v]) => v === old) ? old : fallback ?? opts[0][0];
+  };
+  let formSport = null;
   const dirSel = select([['over', 'Üst'], ['under', 'Alt']], 'over');
   const lineIn = el('input');
   Object.assign(lineIn, { type: 'number', step: '0.5', min: '0', value: '4.5' });
@@ -251,7 +278,7 @@ function openTargetForm(matchId) {
         const ps = rec.list.filter((p) => p.side === side && p.starter === starter);
         if (!ps.length) continue;
         const g = el('optgroup');
-        g.label = `${team} · ${starter ? 'İlk 11' : 'Yedekler'}`;
+        g.label = `${team} · ${starter ? (isBasket(mid) ? 'İlk 5' : 'İlk 11') : 'Yedekler'}`;
         for (const p of ps) {
           const o = el('option', null, `${p.num ? `#${p.num} ` : ''}${p.name}`);
           o.value = String(p.id);
@@ -282,11 +309,24 @@ function openTargetForm(matchId) {
 
   const sync = () => {
     const player = kindSel.value === 'player';
+    const sport = matchSport(Number(matchSel.value));
+    const basket = sport === 'basketball';
+    if (sport !== formSport) {
+      // Spor değişince barem varsayılanı da değişir (futbol 4.5 şut, basketbol 160.5 sayı)
+      const defaults = ['4.5', '0.5', '160.5', '80.5', '15.5'];
+      if (formSport !== null && defaults.includes(lineIn.value)) lineIn.value = basket ? (player ? '15.5' : '160.5') : (player ? '0.5' : '4.5');
+      if (formSport !== null) sideSel.value = basket ? 'total' : 'home';
+      formSport = sport;
+    }
+    fillSelect(statSel, basket ? (player ? BASKET_PLAYER_STATS : BASKET_TEAM_STATS)
+      : player ? [['shots', 'Toplam şut'], ['sot', 'İsabetli şut']]
+        : [['shots', 'Toplam şut'], ['sot', 'İsabetli şut'], ['corners', 'Korner']], basket ? 'points' : 'sot');
+    // Basketbolda yarı/çeyrek yalnız sayı için; diğer istatistikler maç sonu
+    fillSelect(periodSel, basket ? (statSel.value === 'points' ? BASKET_PERIODS : BASKET_PERIODS.slice(0, 1))
+      : [['ALL', 'Maç sonu'], ['1ST', '1. yarı'], ['2ND', '2. yarı']]);
     sideField.hidden = player;
     periodField.hidden = player;
     playerField.hidden = !player;
-    statSel.options[2].hidden = player; // oyuncu için korner yok
-    if (player && statSel.value === 'corners') statSel.value = 'sot';
     if (player) fillPlayers();
 
     const ev = state.events.get(Number(matchSel.value));
@@ -303,8 +343,8 @@ function openTargetForm(matchId) {
   matchSel.addEventListener('change', () => { playersFor = null; sync(); });
   kindSel.addEventListener('change', () => {
     // Oyuncu barem varsayılanı daha düşük olur
-    if (kindSel.value === 'player' && lineIn.value === '4.5') lineIn.value = '0.5';
-    if (kindSel.value === 'team' && lineIn.value === '0.5') lineIn.value = '4.5';
+    const swap = { '4.5': '0.5', '0.5': '4.5', '160.5': '15.5', '80.5': '15.5', '15.5': '160.5' };
+    if (swap[lineIn.value]) lineIn.value = swap[lineIn.value];
     sync();
   });
   for (const c of [sideSel, playerSel, statSel, periodSel, dirSel]) c.addEventListener('change', sync);
@@ -341,6 +381,8 @@ function openTargetForm(matchId) {
   });
   form.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTargetForm(); });
 
+  if (isBasket(matchId)) { lineIn.value = '160.5'; sideSel.value = 'total'; }
+  formSport = matchSport(matchId);
   sync();
   card.formHost.append(form);
   card.targetBtn.classList.add('on');

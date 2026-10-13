@@ -11,6 +11,7 @@ const STAT_GROUP_NAMES = {
   Duels: 'Mücadeleler',
   Defending: 'Savunma',
   Goalkeeping: 'Kaleci',
+  Scoring: 'Sayılar', Other: 'Oyun', Lead: 'Liderlik',
 };
 const STAT_NAMES = {
   ballPossession: 'Topla oynama', expectedGoals: 'Beklenen gol (xG)',
@@ -38,6 +39,12 @@ const STAT_NAMES = {
   goalkeeperSaves: 'Kurtarış', goalsPrevented: 'Önlenen gol',
   diveSaves: 'Kritik kurtarış', highClaims: 'Havadan alınan top',
   punches: 'Yumruklama', goalKicks: 'Aut atışı',
+  // Basketbol
+  freeThrowsScored: 'Serbest atış', twoPointersScored: "2'lik", threePointersScored: "3'lük",
+  fieldGoalsScored: 'Saha içi isabet', rebounds: 'Ribaund', defensiveRebounds: 'Savunma ribaundu',
+  offensiveRebounds: 'Hücum ribaundu', assists: 'Asist', turnovers: 'Top kaybı', steals: 'Top çalma',
+  blocks: 'Blok', totalFouls: 'Faul', timeouts: 'Mola', maxPointsInARow: 'Üst üste en fazla sayı',
+  timeSpentInLead: 'Önde geçen süre', leadChanges: 'Liderlik değişimi', biggestLead: 'En büyük fark',
 };
 const PLAYER_STAT_NAMES = {
   minutesPlayed: 'Oynanan dakika', rating: 'Puan',
@@ -67,7 +74,16 @@ const PLAYER_STAT_NAMES = {
   expectedGoalsOnTarget: 'İsabetli şut xG (xGOT)', totalKeeperSweeper: 'Kaleci çıkışı',
   accurateKeeperSweeper: 'Başarılı kaleci çıkışı', bestBallCarryProgression: 'En uzun ilerleme',
   totalProgressiveBallCarriesDistance: 'İleri top taşıma mesafesi',
+  // Basketbol
+  secondsPlayed: 'Süre', points: 'Sayı', twoPointsMade: "2'lik isabet", twoPointAttempts: "2'lik deneme",
+  threePointsMade: "3'lük isabet", threePointAttempts: "3'lük deneme", freeThrowsMade: 'Serbest atış isabet',
+  freeThrowAttempts: 'Serbest atış deneme', fieldGoalsMade: 'Saha içi isabet', fieldGoalAttempts: 'Saha içi deneme',
+  rebounds: 'Ribaund', defensiveRebounds: 'Savunma ribaundu', offensiveRebounds: 'Hücum ribaundu',
+  turnovers: 'Top kaybı', blocks: 'Blok', personalFouls: 'Faul', assists: 'Asist', steals: 'Top çalma',
+  pir: 'Verimlilik (PIR)', plusMinus: 'Artı / eksi', effectiveFieldGoalPercentage: 'Efektif isabet %',
+  trueShootingPercentage: 'Gerçek isabet %', usage: 'Hücum kullanımı %', fieldGoalPct: 'Saha içi isabet %',
 };
+const BASKET_TABS = { '1Q': '1Ç', '2Q': '2Ç', '3Q': '3Ç', '4Q': '4Ç' };
 const PLAYER_HIDDEN_KEYS = new Set(['ratingVersions', 'statisticsType']);
 const RING_STAT_KEYS = new Set(['duelWonPercent', 'groundDuelsPercentage',
   'aerialDuelsPercentage', 'dribblesPercentage', 'wonTacklePercent']);
@@ -206,6 +222,7 @@ function renderTeamStats(id) {
   const block = raw.statistics?.find((item) => item.period === statsModalTab);
   if (!block?.groups?.length) return statsEmpty('Bu dönem için istatistik henüz yok.');
   const container = el('div', 'stats-groups');
+  if (isBasket(id) && statsModalTab === 'ALL') container.append(renderQuarterScores(state.events.get(id)));
   for (const group of block.groups) {
     if (!group.statisticsItems?.length) continue;
     const section = el('section', 'stats-group');
@@ -214,6 +231,54 @@ function renderTeamStats(id) {
     container.append(section);
   }
   return container.children.length ? container : statsEmpty('Bu dönem için istatistik henüz yok.');
+}
+
+// Basketbol: çeyrek çeyrek skor tablosu (uzatmalar dahil)
+function renderQuarterScores(ev) {
+  const section = el('section', 'stats-group stats-quarters');
+  section.append(el('h3', null, 'Periyot skorları'));
+  const total = ev?.time?.totalPeriodCount || 4;
+  const periods = [];
+  for (let n = 1; ev?.homeScore?.[`period${n}`] != null || n <= total; n++) {
+    if (n > 9) break;
+    periods.push(n);
+  }
+  const head = (n) => n > total ? `UZ${n - total > 1 ? n - total : ''}` : `${n}${total === 2 ? 'Y' : 'Ç'}`;
+  const table = el('table');
+  const tr = el('tr');
+  tr.append(el('th'), ...periods.map((n) => el('th', null, head(n))), el('th', null, 'Toplam'));
+  table.append(tr);
+  for (const side of ['home', 'away']) {
+    const score = ev?.[`${side}Score`];
+    const row = el('tr');
+    row.append(el('td', 'team', teamName(ev?.[`${side}Team`])),
+      ...periods.map((n) => el('td', null, score?.[`period${n}`] ?? '–')),
+      el('td', 'total', score?.current ?? '–'));
+    table.append(row);
+  }
+  section.append(table);
+  return section;
+}
+
+// Basketbol maçında dönem sekmeleri gelen veriye göre: Tümü + varsa 1Ç..4Ç
+function syncStatsTabs(id) {
+  const tabs = $('#statsTabs');
+  let wanted = [['ALL', 'Tümü'], ['1ST', '1. yarı'], ['2ND', '2. yarı']];
+  if (isBasket(id)) {
+    const periods = new Set((state.statsRaw.get(id)?.statistics || []).map((b) => b.period));
+    wanted = [['ALL', 'Tümü'], ...Object.entries(BASKET_TABS).filter(([p]) => periods.has(p))];
+  }
+  const key = wanted.map(([p]) => p).join(',');
+  if (tabs.dataset.tabs !== key) {
+    tabs.dataset.tabs = key;
+    tabs.replaceChildren(...wanted.map(([p, text]) => {
+      const b = el('button', null, text);
+      b.dataset.statsTab = p;
+      b.setAttribute('role', 'tab');
+      return b;
+    }));
+  }
+  if (!wanted.some(([p]) => p === statsModalTab)) statsModalTab = 'ALL';
 }
 
 function playerStatLabel(key) {
@@ -295,7 +360,7 @@ function renderPlayerStats(id) {
     const head = el('div', 'stats-player-detail-head');
     const photo = playerAvatar(player, 'stats-player-photo');
     const heading = el('div');
-    heading.append(el('h3', null, player.name), el('span', null, `${player.num || '–'} · ${player.starter ? 'İlk 11' : 'Yedek'}`));
+    heading.append(el('h3', null, player.name), el('span', null, `${player.num || '–'} · ${player.starter ? (isBasket(id) ? 'İlk 5' : 'İlk 11') : 'Yedek'}`));
     head.append(photo, heading);
     const data = rec.details.get(player.id);
     if (data?.rating != null) head.append(playerRating(data.rating));
@@ -306,7 +371,8 @@ function renderPlayerStats(id) {
         if (PLAYER_HIDDEN_KEYS.has(key) || key.endsWith('ValueNormalized')
           || value == null || typeof value === 'object') continue;
         const row = el('div', 'stats-player-value');
-        row.append(el('span', null, playerStatLabel(key)), el('strong', null, playerStatValue(value)));
+        const shown = key === 'secondsPlayed' ? `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}` : playerStatValue(value);
+        row.append(el('span', null, playerStatLabel(key)), el('strong', null, shown));
         values.append(row);
       }
       detail.append(values);
@@ -369,6 +435,7 @@ function renderStatsModal() {
     button.classList.toggle('on', active);
     button.setAttribute('aria-selected', String(active));
   }
+  syncStatsTabs(id);
   $('#statsTabs').hidden = statsModalView === 'players';
   for (const button of $('#statsTabs').children) {
     const active = button.dataset.statsTab === statsModalTab;

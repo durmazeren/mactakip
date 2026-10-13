@@ -9,8 +9,13 @@ const FEATURED_LEAGUES = [
   [52, 'Trendyol Süper Lig'], [37, 'Eredivisie'], [238, 'Liga Portugal Betclic'],
 ].map(([id, name], topRank) => ({ id, name, category: '', topRank }));
 const UCL_LEAGUE = { id: 7, name: 'Şampiyonlar Ligi', category: 'Avrupa', topRank: 0 };
+const BASKET_FEATURED_LEAGUES = [
+  [132, 'NBA', 'ABD'], [138, 'EuroLeague', 'Avrupa'], [519, 'Basketbol Süper Ligi', 'Türkiye'],
+  [141, 'EuroCup', 'Avrupa'], [9357, 'Şampiyonlar Ligi', 'FIBA'], [486, 'WNBA', 'ABD'],
+].map(([id, name, category], topRank) => ({ id, name, category, topRank }));
 
 function featuredLeaguesForDate() {
+  if (state.pickerSport === 'basketball') return BASKET_FEATURED_LEAGUES;
   const local = FEATURED_LEAGUES.map((league) => ({ ...league, topRank: league.topRank + 1 }));
   return typeof isUclMatchDate === 'function' && isUclMatchDate()
     ? [UCL_LEAGUE, ...local] : local;
@@ -97,8 +102,35 @@ function leagueLabel(league) {
   return [league.name, league.category].filter(Boolean).join(' · ');
 }
 
+function newCatalog(sport) {
+  return { sport, live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, lastAttemptAt: 0,
+    date: null, loading: null, error: false, partial: false };
+}
+
+// Futbol / Basketbol: liste, lig filtresi ve öne çıkan ligler seçilen spora göre
+function setPickerSport(sport) {
+  if (sport === state.pickerSport) return;
+  state.pickerSport = sport;
+  save('pickerSport', sport);
+  state.leagueFilter = load(leagueFilterKey(), null);
+  state.catalog = newCatalog(sport);
+  state.searchResults = [];
+  updateSearchPlaceholder();
+  renderDropdown();
+  loadCatalog().then(() => { if (!$('#dropdown').hidden && state.pickerSport === sport) renderDropdown(); });
+  const leagueId = selectedLeagueId();
+  if (leagueId) loadLeagueMatches(leagueId).then(() => {
+    if (!$('#dropdown').hidden && selectedLeagueId() === leagueId) renderDropdown();
+  });
+  onSearchInput();
+}
+
+const leagueFilterKey = () => state.pickerSport === 'basketball' ? 'leagueFilterBasketball' : 'leagueFilter';
+
 async function loadCatalog(force = false) {
+  if (state.catalog.sport !== state.pickerSport) state.catalog = newCatalog(state.pickerSport);
   const c = state.catalog;
+  const sport = c.sport;
   const date = localDate();
   if (c.loading) return c.loading;
   if (!force && c.date === date && Date.now() - c.loadedAt < CATALOG_TTL_MS) return;
@@ -106,8 +138,8 @@ async function loadCatalog(force = false) {
   c.lastAttemptAt = Date.now();
   c.loading = (async () => {
     const [live, today] = await Promise.all([
-      api('sport/football/events/live').catch(() => undefined),
-      api(`sport/football/scheduled-events/${date}`).catch(() => undefined),
+      api(`sport/${sport}/events/live`).catch(() => undefined),
+      api(`sport/${sport}/scheduled-events/${date}`).catch(() => undefined),
     ]);
     c.error = live === undefined && today === undefined;
     c.partial = !c.error && (live === undefined || today === undefined);
@@ -123,7 +155,8 @@ async function loadCatalog(force = false) {
     c.loadedAt = c.error ? 0 : Date.now();
   })().finally(() => {
     c.loading = null;
-    if (typeof document !== 'undefined' && !$('#dropdown').hidden && document.activeElement?.id !== 'leagueFilter') renderDropdown();
+    if (typeof document !== 'undefined' && state.catalog === c && !$('#dropdown').hidden
+      && document.activeElement?.id !== 'leagueFilter') renderDropdown();
   });
   return c.loading;
 }
@@ -133,11 +166,11 @@ async function loadLeagueMatches(id, force = false) {
   const c = state.catalog;
   const date = localDate();
   const old = c.leagueData;
-  if (!force && old?.id === id && old.date === date) {
+  if (!force && old?.id === id && old.date === date && old.sport === c.sport) {
     if (old.loading) return old.loading;
     if (old.loadedAt && Date.now() - old.loadedAt < CATALOG_TTL_MS) return;
   }
-  const data = { id, date, events: [], loadedAt: 0, loading: null, error: false, partial: false };
+  const data = { id, date, sport: c.sport, events: [], loadedAt: 0, loading: null, error: false, partial: false };
   c.leagueData = data;
   data.loading = (async () => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
@@ -169,12 +202,14 @@ function onSearchInput() {
   state.searchResults = [];
   renderDropdown();
   if (norm(q).length < 3 || parseEventId(q)) return;
+  const sport = state.pickerSport;
+  $('#search').dataset.sport = sport;
   searchTimer = setTimeout(async () => {
     const res = await api(`search/events?q=${encodeURIComponent(q)}&page=0`).catch(() => null);
-    if ($('#search').value !== q) return;
+    if ($('#search').value !== q || $('#search').dataset.sport !== sport) return;
     const now = Date.now() / 1000;
     state.searchResults = (res?.results || []).map((r) => r.entity)
-      .filter((e) => e?.homeTeam && (isLive(e) || (e.startTimestamp > now - 4 * 3600 && e.startTimestamp < now + 3 * 86400)))
+      .filter((e) => e?.homeTeam && (eventSport(e) || 'football') === sport && (isLive(e) || (e.startTimestamp > now - 4 * 3600 && e.startTimestamp < now + 3 * 86400)))
       .sort((a, b) => a.startTimestamp - b.startTimestamp);
     renderDropdown();
   }, 400);
@@ -215,6 +250,21 @@ function dropdownGroups(raw) {
 
 function renderLeagueFilter(dd) {
   const row = el('div', 'dd-league-row');
+  const sports = el('div', 'seg dd-sport');
+  sports.setAttribute('role', 'tablist');
+  sports.setAttribute('aria-label', 'Spor');
+  for (const [sport, text] of Object.entries(SPORTS)) {
+    const b = el('button', state.pickerSport === sport ? 'on' : null, text);
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(state.pickerSport === sport));
+    b.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      setPickerSport(sport);
+    });
+    sports.append(b);
+  }
+  row.append(sports);
   const label = el('label', 'dd-league-label', 'Lig');
   const select = el('select', 'dd-league-select');
   label.htmlFor = select.id = 'leagueFilter';
@@ -238,7 +288,7 @@ function renderLeagueFilter(dd) {
   select.addEventListener('change', () => {
     const league = leagues.find((item) => item.id === Number(select.value));
     state.leagueFilter = league || null;
-    save('leagueFilter', state.leagueFilter);
+    save(leagueFilterKey(), state.leagueFilter);
     updateSearchPlaceholder();
     renderDropdown();
     $('#search').focus();
@@ -348,7 +398,8 @@ function openReplacePicker(id) {
 function updateSearchPlaceholder() {
   const s = $('#search');
   const league = state.leagueFilter;
-  const prefix = selectedLeagueId() ? `${league.name || `Lig #${selectedLeagueId()}`} · ` : '';
+  const prefix = (state.pickerSport === 'basketball' ? '🏀 ' : '')
+    + (selectedLeagueId() ? `${league.name || `Lig #${selectedLeagueId()}`} · ` : '');
   s.placeholder = prefix + (state.replaceMatchId != null
     ? 'Bu animasyona yeni maç seç veya link yapıştır…'
     : state.addMode === 'shot'

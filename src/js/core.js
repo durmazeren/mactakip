@@ -51,6 +51,30 @@ const CARD_STATS = [
   { key: 'saves', label: 'Kurtarış', name: 'Kaleci kurtarışı', group: 'Disiplin ve savunma', source: 'goalkeeperSaves' },
 ];
 
+// Basketbol kartı seçenekleri. "Sayı" istatistik yanıtında yok, skordan okunur.
+const BASKET_CARD_STATS = [
+  { key: 'points', label: 'Sayı', name: 'Sayı', group: 'Sayılar', source: null },
+  { key: 'threes', label: "3'lük", name: "3'lük isabet", group: 'Sayılar', source: 'threePointersScored' },
+  { key: 'twos', label: "2'lik", name: "2'lik isabet", group: 'Sayılar', source: 'twoPointersScored' },
+  { key: 'freeThrows', label: 'Serbest', name: 'Serbest atış isabeti', group: 'Sayılar', source: 'freeThrowsScored' },
+  { key: 'fieldGoals', label: 'Saha içi', name: 'Saha içi isabet', group: 'Sayılar', source: 'fieldGoalsScored' },
+  { key: 'rebounds', label: 'Ribaund', name: 'Ribaund', group: 'Oyun', source: 'rebounds' },
+  { key: 'offRebounds', label: 'Hüc. rib.', name: 'Hücum ribaundu', group: 'Oyun', source: 'offensiveRebounds' },
+  { key: 'defRebounds', label: 'Sav. rib.', name: 'Savunma ribaundu', group: 'Oyun', source: 'defensiveRebounds' },
+  { key: 'assists', label: 'Asist', name: 'Asist', group: 'Oyun', source: 'assists' },
+  { key: 'turnovers', label: 'Top kaybı', name: 'Top kaybı', group: 'Oyun', source: 'turnovers' },
+  { key: 'steals', label: 'Top çalma', name: 'Top çalma', group: 'Oyun', source: 'steals' },
+  { key: 'blocks', label: 'Blok', name: 'Blok', group: 'Oyun', source: 'blocks' },
+  { key: 'fouls', label: 'Faul', name: 'Faul', group: 'Oyun', source: 'totalFouls' },
+  { key: 'timeouts', label: 'Mola', name: 'Mola', group: 'Oyun', source: 'timeouts' },
+  { key: 'maxRun', label: 'En uzun seri', name: 'Üst üste en fazla sayı', group: 'Liderlik', source: 'maxPointsInARow' },
+  { key: 'leadChanges', label: 'Lider değ.', name: 'Liderlik değişimi', group: 'Liderlik', source: 'leadChanges' },
+  { key: 'biggestLead', label: 'En büyük fark', name: 'En büyük fark', group: 'Liderlik', source: 'biggestLead' },
+];
+const DEFAULT_CARD_STATS = { football: ['shots', 'sot', 'corners'], basketball: ['threes', 'rebounds', 'assists', 'turnovers'] };
+const SPORTS = { football: 'Futbol', basketball: 'Basketbol' };
+const cardMetrics = (sport) => sport === 'basketball' ? BASKET_CARD_STATS : CARD_STATS;
+
 // Animasyon sayfasını koyu temaya uydurmak için içine eklenen CSS
 const STAGE_CSS = `
   html, body { background: #000 !important; overflow: hidden !important; }
@@ -82,21 +106,26 @@ const state = {
   period: 'ALL',
   replaceMatchId: null,
   addMode: 'anim',                   // arama kutusundan seçilen maç nereye eklensin
-  catalog: { live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, lastAttemptAt: 0, date: null, loading: null, error: false, partial: false },
-  leagueFilter: load('leagueFilter', null), // { id, name, category } veya null
+  catalog: { sport: null, live: [], today: [], leagues: [], leagueData: null, loadedAt: 0, lastAttemptAt: 0, date: null, loading: null, error: false, partial: false },
+  leagueFilter: null,                // { id, name, category } veya null; spor başına ayrı saklanır
   searchResults: [],
   lastShown: new Map(),              // şut ekranında yanıp sönme için önceki değerler
   targets: load('targets', []),      // kupon hedefleri
   targetStatus: new Map(),           // hedef id -> son durum (tuttu animasyonu için)
-  cardStats: load('cardStats', ['shots', 'sot', 'corners']), // şut kartında görünen istatistikler
+  cardStats: load('cardStats', DEFAULT_CARD_STATS.football), // şut kartında görünen istatistikler
+  basketCardStats: load('basketCardStats', DEFAULT_CARD_STATS.basketball),
+  pickerSport: load('pickerSport', 'football') === 'basketball' ? 'basketball' : 'football',
   cardSort: load('cardSort', 'manual'), // şut kartı sıralaması: manual | auto
   layout: Object.assign({ mode: 'grid', arrange: 'auto', focus: null, free: {}, z: [] }, load('layout', {})),
 };
 
+state.leagueFilter = load(state.pickerSport === 'basketball' ? 'leagueFilterBasketball' : 'leagueFilter', null);
+
 function loadMatches() {
   const saved = load('matches', null);
   if (Array.isArray(saved)) {
-    return saved.filter((m) => Number.isInteger(m?.id)).map((m) => ({ id: m.id, anim: !!m.anim, animationOnly: !!m.animationOnly }));
+    return saved.filter((m) => Number.isInteger(m?.id)).map((m) => ({ id: m.id, anim: !!m.anim,
+      animationOnly: !!m.animationOnly, ...(m.sport === 'basketball' ? { sport: 'basketball' } : {}) }));
   }
   // Eski sürümden kalan liste: hepsi animasyonlu
   return load('selected', []).filter(Number.isInteger).map((id) => ({ id, anim: true }));
@@ -106,6 +135,17 @@ const saveTargets = () => save('targets', state.targets);
 const saveLayout = () => save('layout', state.layout);
 const findMatch = (id) => state.matches.find((m) => m.id === id);
 const animIds = () => state.matches.filter((m) => m.anim).map((m) => m.id);
+
+// Maçın sporu: Sofascore verisinden; veri yoksa listeye eklenirken kaydedilen değer
+function eventSport(ev) {
+  const slug = ev?.tournament?.category?.sport?.slug || ev?.sport?.slug;
+  return slug === 'basketball' ? 'basketball' : slug ? 'football' : null;
+}
+function matchSport(id) {
+  return eventSport(state.events.get(id)) || findMatch(id)?.sport || 'football';
+}
+const isBasket = (id) => matchSport(id) === 'basketball';
+const cardStatsFor = (sport) => sport === 'basketball' ? state.basketCardStats : state.cardStats;
 
 function animationOnlyEvent(id) {
   return { id, _animationOnly: true, homeTeam: { name: `Maç #${id}` },
@@ -136,11 +176,70 @@ const STATUS_TR = {
   Postponed: 'Ertelendi', Canceled: 'İptal', Cancelled: 'İptal', Interrupted: 'Durdu',
   Abandoned: 'Yarıda kaldı', Suspended: 'Askıda', 'Awaiting extra time': 'Uzatma bekleniyor',
   'Extra time halftime': 'Uzatma arası', 'Awaiting penalties': 'Penaltı bekleniyor',
+  Pause: 'Ara', Halftime: 'Devre arası', Overtime: 'Uzatma',
 };
 const statusText = (st) => STATUS_TR[st?.description] || st?.description || '';
 
 function isLive(ev) { return ev?.status?.type === 'inprogress'; }
 function isOver(ev) { return ['finished', 'canceled', 'postponed'].includes(ev?.status?.type); }
+
+/* Basketbol saati. Sofascore oynanan süreyi (time.played, saniye) verir; saat
+ * çalışıyorsa son güncellemeden beri geçen süre eklenir. Saat durunca durur. */
+const BASKET_PERIOD = { 13: 1, 14: 2, 15: 3, 16: 4, 6: 1, 7: 2 }; // 6/7: yarılarla oynanan ligler
+
+function basketPeriodNo(ev) {
+  const st = ev?.status || {};
+  if (st.type !== 'inprogress') return null;
+  if (BASKET_PERIOD[st.code]) return BASKET_PERIOD[st.code];
+  const t = ev.time || {};
+  const total = t.totalPeriodCount || 4;
+  if (/overtime/i.test(st.description || '') && t.played != null && t.periodLength) {
+    return total + Math.max(1, Math.ceil((t.played - total * t.periodLength) / (t.overtimeLength || 300)));
+  }
+  return null; // ara
+}
+
+function basketPlayed(ev) {
+  const t = ev?.time;
+  if (t?.played == null) return null;
+  let played = t.played;
+  if (t.clockRunning && t.clockRunningLastUpdated) {
+    played += Math.max(0, (Date.now() - Date.parse(t.clockRunningLastUpdated)) / 1000);
+  }
+  return played;
+}
+
+function basketMinuteText(ev) {
+  const st = ev.status || {};
+  const n = basketPeriodNo(ev);
+  if (!n) return st.code === 31 ? 'Devre' : statusText(st) || 'Ara';
+  const t = ev.time || {};
+  const total = t.totalPeriodCount || 4;
+  const halves = total === 2;
+  const label = n > total ? `UZ${n - total > 1 ? n - total : ''}` : `${n}${halves ? 'Y' : 'Ç'}`;
+  const played = basketPlayed(ev);
+  if (played == null || !t.periodLength) return label;
+  const end = n <= total ? n * t.periodLength : total * t.periodLength + (n - total) * (t.overtimeLength || 300);
+  const left = Math.max(0, Math.ceil(end - played));
+  return `${label} ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+// Biten çeyrek sayısı (uzatmalar dahil değil). Ara ve devre arasında oynanan süreye bakılır.
+function basketQuartersDone(ev) {
+  const st = ev?.status || {};
+  const total = ev?.time?.totalPeriodCount || 4;
+  if (st.type === 'finished') return total;
+  if (st.type !== 'inprogress') return 0;
+  const n = basketPeriodNo(ev);
+  if (n) return Math.min(total, n - 1);
+  if (st.code === 31) return total / 2;
+  const t = ev.time || {};
+  if (t.played != null && t.periodLength) return Math.min(total, Math.floor(t.played / t.periodLength + 0.001));
+  // Oynanan süre yoksa skorda yer alan son periyot bitmiş sayılır
+  let done = 0;
+  while (done < total && ev.homeScore?.[`period${done + 1}`] != null) done++;
+  return done;
+}
 
 // Dakika metni: Sofascore'un periyot başlangıç zamanından hesaplanır
 function minuteText(ev) {
@@ -153,6 +252,7 @@ function minuteText(ev) {
   }
   if (st.type === 'finished') return 'MS';
   if (st.type !== 'inprogress') return statusText(st);
+  if (eventSport(ev) === 'basketball') return basketMinuteText(ev);
   if (st.code === 31) return 'İY';
   if (st.code === 50) return 'Pen.';
   const periods = { 6: [0, 45], 7: [45, 90], 41: [90, 105], 42: [105, 120] };
@@ -169,7 +269,8 @@ function scoreText(ev) {
 }
 
 // Kart istatistikleri: aynı Sofascore yanıtını periyot bazında işler.
-function parseStats(json) {
+function parseStats(json, sport = 'football') {
+  if (sport === 'basketball') return parseBasketStats(json);
   const out = {};
   for (const block of json?.statistics || []) {
     const items = (block.groups || []).flatMap((g) => g.statisticsItems || []);
@@ -201,6 +302,57 @@ function parseStats(json) {
     out[block.period] = { ...values, shots, sot };
   }
   return out;
+}
+
+function statPicker(block) {
+  const items = (block?.groups || []).flatMap((g) => g.statisticsItems || []);
+  const byKey = new Map(items.map((item) => [item.key, item]));
+  const number = (value) => {
+    const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value).replace(',', '.'));
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  };
+  return (key) => {
+    const it = byKey.get(key);
+    return it ? [number(it.homeValue ?? it.home), number(it.awayValue ?? it.away)] : null;
+  };
+}
+
+/* Basketbol: NBA/WNBA gibi liglerde çeyrek blokları (1Q..4Q) da gelir; yarılar
+ * bunların toplamıdır. "Sayı" satırı skordan doldurulur (bkz. basketPoints). */
+function parseBasketStats(json) {
+  const out = {};
+  for (const block of json?.statistics || []) {
+    const pick = statPicker(block);
+    out[block.period] = Object.fromEntries(BASKET_CARD_STATS.filter((m) => m.source)
+      .map(({ key, source }) => [key, pick(source)]));
+  }
+  const sum = (periods) => {
+    const blocks = periods.map((p) => out[p]).filter(Boolean);
+    if (!blocks.length) return null;
+    return Object.fromEntries(BASKET_CARD_STATS.filter((m) => m.source).map(({ key }) => {
+      const pairs = blocks.map((b) => b[key]).filter(Boolean);
+      return [key, pairs.length ? [0, 1].map((i) => pairs.reduce((a, p) => a + p[i], 0)) : null];
+    }));
+  };
+  if (out['1Q']) out['1ST'] = sum(['1Q', '2Q']);
+  if (out['3Q']) out['2ND'] = sum(['3Q', '4Q']);
+  return out;
+}
+
+// Basketbol skoru periyot bazında: 1ST = ilk yarı, 2ND = ikinci yarı + uzatmalar,
+// Q1..Q4 = çeyrek (uzatma hariç), ALL = maç (uzatma dahil)
+function basketPoints(ev, period) {
+  if (!ev || ev.status?.type === 'notstarted') return null;
+  const side = (score) => {
+    const p = (n) => score?.[`period${n}`] ?? 0;
+    if (period === 'ALL') return score?.current ?? 0;
+    if (period === '1ST') return p(1) + p(2);
+    if (period === '2ND') return Math.max(0, (score?.current ?? 0) - p(1) - p(2));
+    const q = /^Q([1-4])$/.exec(period);
+    return q ? p(Number(q[1])) : null;
+  };
+  const h = side(ev.homeScore), a = side(ev.awayScore);
+  return h == null || a == null ? null : [h, a];
 }
 
 function parseEventId(text) {

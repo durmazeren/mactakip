@@ -27,7 +27,9 @@ async function addMatch(id, ev, anim, fromLink = false) {
     } else ev = res.event;
   }
   if (findMatch(id)) return; // beklerken eklendiyse
-  state.matches.push({ id, anim, animationOnly });
+  // Yalnız animasyon açılan linkte spor bilinmiyor; seçicide hangi spor açıksa o varsayılır
+  const sport = eventSport(ev) || (fromLink ? state.pickerSport : 'football');
+  state.matches.push({ id, anim, animationOnly, ...(sport === 'basketball' ? { sport } : {}) });
   state.events.set(id, ev);
   saveMatches();
   if (anim) createTile(id);
@@ -66,7 +68,8 @@ async function replaceAnimation(oldId, newId, ev) {
   } else {
     old.anim = false;
     if (next) state.matches.splice(nextIndex, 1);
-    else next = { id: newId, anim: false, animationOnly: false };
+    else next = { id: newId, anim: false, animationOnly: false,
+      ...(eventSport(ev) === 'basketball' ? { sport: 'basketball' } : {}) };
     next.anim = true;
     state.matches.splice(state.matches.indexOf(old), 0, next);
     state.layout.free[newId] = state.layout.free[oldId];
@@ -178,11 +181,16 @@ async function pollOne(id) {
   if (evRes?.event) {
     state.events.set(id, evRes.event);
     const match = findMatch(id);
+    const sport = eventSport(evRes.event);
+    if (match && sport && (match.sport || 'football') !== sport) {
+      if (sport === 'basketball') match.sport = sport; else delete match.sport;
+      saveMatches();
+    }
     if (match?.animationOnly) { match.animationOnly = false; saveMatches(); }
   }
   if (!animationOnly && stRes) {
     state.statsRaw.set(id, stRes);
-    state.stats.set(id, parseStats(stRes));
+    state.stats.set(id, parseStats(stRes, matchSport(id)));
   }
   else if (!animationOnly && stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
     state.statsRaw.delete(id);
@@ -212,13 +220,16 @@ async function pollAll() {
   }
 }
 
-// Dakikaları her saniye yerel olarak ilerlet
+// Dakikaları (basketbolda çeyrek saatini) her saniye yerel olarak ilerlet
 function tickMinutes() {
-  for (const id of animIds()) {
+  for (const { id } of state.matches) {
     const ev = state.events.get(id);
+    if (!ev || !isLive(ev)) continue;
+    const text = minuteText(ev);
     const t = state.tiles.get(id);
-    if (!ev || !t || !isLive(ev)) continue;
-    $('.minute', t.el).textContent = minuteText(ev);
+    if (t) $('.minute', t.el).textContent = text;
+    const card = shotCards.get(id);
+    if (card && card.meta.textContent !== text) card.meta.textContent = text;
   }
 }
 

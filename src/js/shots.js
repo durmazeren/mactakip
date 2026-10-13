@@ -5,8 +5,6 @@
 
 const shotCards = new Map(); // id -> { el, refs... }
 
-// Kartta hangi istatistiklerin görüneceği (⚙ ayarı)
-const cardStatsVisible = () => state.cardStats;
 const formatCardStat = (value, metric) => value == null ? '–'
   : metric.format === 'decimal' ? value.toFixed(2)
     : metric.format === 'percent' ? `${Math.round(value)}%` : String(value);
@@ -53,12 +51,6 @@ function ensureCard(id) {
   resetBtn.addEventListener('click', () => resetMatch(id));
   top.append(title, meta, targetBtn, resetBtn, animBtn, rm);
   const statsBox = el('div', 'sc-stats');
-  const rows = {};
-  for (const metric of CARD_STATS) {
-    rows[metric.key] = cmpRow(metric.label);
-    rows[metric.key].root.title = metric.name;
-    statsBox.append(rows[metric.key].root);
-  }
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');
   const formHost = el('div', 'sc-form-host');
@@ -92,9 +84,22 @@ function ensureCard(id) {
     openStatsModal(id);
   });
   $('#shotList').append(card);
-  const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows, none, targets, formHost };
+  const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows: {}, sport: null, none, targets, formHost };
   shotCards.set(id, ref);
   return ref;
+}
+
+// Satırlar maçın sporuna göre kurulur (futbol: şut/korner…, basketbol: ribaund/asist…)
+function ensureRows(c, sport) {
+  if (c.sport === sport) return;
+  c.sport = sport;
+  c.rows = {};
+  c.statsBox.replaceChildren();
+  for (const metric of cardMetrics(sport)) {
+    c.rows[metric.key] = cmpRow(metric.label);
+    c.rows[metric.key].root.title = metric.name;
+    c.statsBox.append(c.rows[metric.key].root);
+  }
 }
 
 function setCmp(row, id, metric, val) {
@@ -174,17 +179,22 @@ function updateCard(id) {
   c.el.classList.toggle('live', live);
   c.targetBtn.classList.toggle('on', openForm?.matchId === id);
 
+  const sport = matchSport(id);
+  ensureRows(c, sport);
+  c.el.classList.toggle('basket', sport === 'basketball');
   const all = state.stats.get(id);
   const none = !!all?.none;
-  const visible = new Set(cardStatsVisible());
+  const visible = new Set(cardStatsFor(sport));
   c.statsBox.hidden = none || !visible.size;
   c.none.hidden = !none;
   if (!none) {
     const st = all?.[state.period];
-    for (const metric of CARD_STATS) {
+    for (const metric of cardMetrics(sport)) {
       const selected = visible.has(metric.key);
       c.rows[metric.key].root.hidden = !selected;
-      if (selected) setCmp(c.rows[metric.key], id, metric, st?.[metric.key]);
+      if (!selected) continue;
+      const value = metric.key === 'points' && sport === 'basketball' ? basketPoints(ev, state.period) : st?.[metric.key];
+      setCmp(c.rows[metric.key], id, metric, value);
     }
   }
   renderTargets(id, c.targets);
@@ -316,69 +326,85 @@ function renderShotList() {
   renderCouponBar();
 }
 
-/* ⚙ Kart ayarı: hangi istatistikler görünsün */
+/* ⚙ Kart ayarı: hangi istatistikler görünsün (futbol ve basketbol ayrı) */
 function initCardSettings() {
   const btn = $('#cardCfgBtn');
   const pop = $('#cardCfg');
-  state.cardStats = Array.isArray(state.cardStats)
-    ? CARD_STATS.map(({ key }) => key).filter((key) => state.cardStats.includes(key))
-    : ['shots', 'sot', 'corners'];
-  pop.replaceChildren();
-  const heading = el('div', 'cfg-heading');
-  heading.append(el('strong', null, 'Kartta göster'));
-  const count = el('span', 'cfg-count');
-  heading.append(count);
-  pop.append(heading);
-  const reset = el('button', 'cfg-reset', 'Varsayılana dön');
-  reset.type = 'button';
-  pop.append(reset);
-  const boxes = new Map();
-  const refresh = (selected) => {
-    state.cardStats = CARD_STATS.map(({ key }) => key).filter((key) => selected.has(key));
-    for (const [key, box] of boxes) box.checked = selected.has(key);
-    count.textContent = `${state.cardStats.length} seçili`;
-    save('cardStats', state.cardStats);
-    renderShotList();
-  };
-  reset.addEventListener('click', () => refresh(new Set(['shots', 'sot', 'corners'])));
-  let group = '';
-  for (const { key, name, group: metricGroup } of CARD_STATS) {
-    if (metricGroup !== group) {
-      group = metricGroup;
-      pop.append(el('div', 'cfg-group', group));
+  const clean = (list, sport) => Array.isArray(list)
+    ? cardMetrics(sport).map(({ key }) => key).filter((key) => list.includes(key))
+    : [...DEFAULT_CARD_STATS[sport]];
+  state.cardStats = clean(state.cardStats, 'football');
+  state.basketCardStats = clean(state.basketCardStats, 'basketball');
+  let sport = state.matches.length && state.matches.every((m) => isBasket(m.id)) ? 'basketball' : 'football';
+
+  const render = () => {
+    pop.replaceChildren();
+    const tabs = el('div', 'seg cfg-sport');
+    for (const [value, text] of Object.entries(SPORTS)) {
+      const b = el('button', value === sport ? 'on' : null, text);
+      b.type = 'button';
+      b.addEventListener('click', () => { sport = value; render(); });
+      tabs.append(b);
     }
-    const label = el('label', 'cfg-row');
-    const box = el('input');
-    box.type = 'checkbox';
-    box.checked = state.cardStats.includes(key);
-    boxes.set(key, box);
-    box.addEventListener('change', () => {
-      const selected = new Set(state.cardStats);
-      if (box.checked) selected.add(key); else selected.delete(key);
-      refresh(selected);
-    });
-    label.append(box, el('span', null, name));
-    pop.append(label);
-  }
-  count.textContent = `${state.cardStats.length} seçili`;
-  pop.append(el('div', 'cfg-group cfg-sort-heading', 'Sıralama'));
-  for (const [value, text] of [['manual', 'Elle (kartı sürükle)'], ['auto', 'Otomatik (canlı ve hedefli üstte)']]) {
-    const label = el('label', 'cfg-row');
-    const radio = el('input');
-    Object.assign(radio, { type: 'radio', name: 'cardSort', value, checked: state.cardSort === value });
-    radio.addEventListener('change', () => {
-      state.cardSort = value;
-      save('cardSort', value);
+    pop.append(tabs);
+    const heading = el('div', 'cfg-heading');
+    heading.append(el('strong', null, `${SPORTS[sport]} kartında göster`));
+    const count = el('span', 'cfg-count', `${cardStatsFor(sport).length} seçili`);
+    heading.append(count);
+    pop.append(heading);
+    const reset = el('button', 'cfg-reset', 'Varsayılana dön');
+    reset.type = 'button';
+    pop.append(reset);
+    const boxes = new Map();
+    const apply = (selected) => {
+      const list = cardMetrics(sport).map(({ key }) => key).filter((key) => selected.has(key));
+      if (sport === 'basketball') { state.basketCardStats = list; save('basketCardStats', list); }
+      else { state.cardStats = list; save('cardStats', list); }
+      for (const [key, box] of boxes) box.checked = selected.has(key);
+      count.textContent = `${list.length} seçili`;
       renderShotList();
-    });
-    label.append(radio, el('span', null, text));
-    pop.append(label);
-  }
+      if (sport === 'basketball') for (const id of state.tiles.keys()) updateTile(id);
+    };
+    reset.addEventListener('click', () => apply(new Set(DEFAULT_CARD_STATS[sport])));
+    let group = '';
+    for (const { key, name, group: metricGroup } of cardMetrics(sport)) {
+      if (metricGroup !== group) {
+        group = metricGroup;
+        pop.append(el('div', 'cfg-group', group));
+      }
+      const label = el('label', 'cfg-row');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = cardStatsFor(sport).includes(key);
+      boxes.set(key, box);
+      box.addEventListener('change', () => {
+        const selected = new Set(cardStatsFor(sport));
+        if (box.checked) selected.add(key); else selected.delete(key);
+        apply(selected);
+      });
+      label.append(box, el('span', null, name));
+      pop.append(label);
+    }
+    pop.append(el('div', 'cfg-group cfg-sort-heading', 'Sıralama'));
+    for (const [value, text] of [['manual', 'Elle (kartı sürükle)'], ['auto', 'Otomatik (canlı ve hedefli üstte)']]) {
+      const label = el('label', 'cfg-row');
+      const radio = el('input');
+      Object.assign(radio, { type: 'radio', name: 'cardSort', value, checked: state.cardSort === value });
+      radio.addEventListener('change', () => {
+        state.cardSort = value;
+        save('cardSort', value);
+        renderShotList();
+      });
+      label.append(radio, el('span', null, text));
+      pop.append(label);
+    }
+  };
+  render();
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     pop.hidden = !pop.hidden;
   });
   document.addEventListener('click', (e) => {
-    if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+    if (!pop.hidden && !pop.contains(e.target) && e.target.isConnected) pop.hidden = true;
   });
 }

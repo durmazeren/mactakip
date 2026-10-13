@@ -44,6 +44,7 @@ function modalContext() {
     document: { body: new Node() }, shotCards: new Map(),
     el: (_tag, className, text) => { const node = new Node(text); node.className = className; return node; },
     findMatch: (id) => ({ id, anim: true }),
+    isBasket: () => false,
     cardOrder: () => [1, 2], teamName: (team) => team?.name || '?', minuteText: () => '', scoreText: () => '0 - 0',
     LOGO_URL: (id) => String(id), closeDropdown() {}, scheduleFit() {},
     api: () => { throw new Error('Panel ek veri isteği attı'); },
@@ -121,7 +122,7 @@ test('mücadele yüzdeleri tek halkada, oranlı değerler halka yanında göster
 
 test('genel maç listesi iki istek kullanır; her lig için ayrı fikstür çekilmez', async () => {
   const calls = [];
-  const state = { catalog: { live: [], today: [], leagues: [], loadedAt: 0, lastAttemptAt: 0 }, searchResults: [] };
+  const state = { pickerSport: 'football', catalog: { sport: 'football', live: [], today: [], leagues: [], loadedAt: 0, lastAttemptAt: 0 }, searchResults: [] };
   const context = vm.createContext({ state, CATALOG_TTL_MS: 60_000, localDate: () => '2026-10-11',
     api: async (request) => { calls.push(request); return { events: [] }; },
   });

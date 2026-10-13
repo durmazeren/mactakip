@@ -108,7 +108,7 @@ select, input { font: inherit; color: var(--text); }
 .dd-hint { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
 .dd-league-row {
   position: sticky; top: 0; z-index: 2;
-  display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 8px;
+  display: grid; grid-template-columns: auto 26px minmax(0, 1fr); align-items: center; gap: 8px;
   padding: 7px 8px; background: var(--s1); border-bottom: 1px solid var(--line-soft);
 }
 .dd-league-label { color: var(--muted); font-size: 11px; font-weight: 700; }
@@ -189,6 +189,7 @@ select, input { font: inherit; color: var(--text); }
   font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden;
 }
 .tile-foot b { color: var(--text); font-variant-numeric: tabular-nums; }
+.tile-foot i { font-style: normal; }
 .tile-foot .src { margin-left: auto; font-size: 11px; }
 .tile-foot.no-stats > span:not(.src) { display: none; }
 .tile-foot.no-stats::before { content: 'Bu maç için istatistik yok'; }
@@ -265,6 +266,8 @@ body.free .rh.n:hover, body.free .rh.s:hover, body.free .rh.e:hover, body.free .
 .alert-badge.goal { background: var(--success); color: #0b1a10; border-color: transparent; font-size: 14px; }
 .alert-badge.sot { background: var(--primary); color: #11132b; border-color: transparent; }
 .alert-badge.corner { background: var(--alert); color: #261c05; border-color: transparent; }
+.alert-quarter { --ring: #f08a3c; }
+.alert-badge.quarter { background: #f08a3c; color: #2a1404; border-color: transparent; }
 
 /* ---------- Şut ekranı ---------- */
 .side {
@@ -509,6 +512,8 @@ body.side-hidden .side { display: none; }
 .pop-title { font-size: 11px; color: var(--muted); padding: 4px 6px 6px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
 .cfg-heading { position: sticky; top: -6px; z-index: 1; display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 7px 6px; background: var(--s1); border-bottom: 1px solid var(--line-soft); }
 .cfg-heading strong { font-size: 12px; }
+.cfg-sport { margin: 2px 6px 6px; }
+.cfg-sport button { flex: 1; }
 .cfg-count { color: var(--muted); font-size: 11px; }
 .cfg-reset { display: block; margin: 7px 6px 3px; padding: 2px 0; border: 0; background: none; color: var(--primary); font-size: 11px; }
 .cfg-reset:hover { text-decoration: underline; }
@@ -689,3 +694,10 @@ body.fs .topbar, body.fs .side { display: none !important; }
 /* ↻ yenile */
 .reset-btn.spinning { animation: spin .8s linear infinite; color: var(--primary); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Basketbol: periyot skorları ---------- */
+.stats-quarters table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.stats-quarters th { color: var(--muted); font-size: 11px; font-weight: 700; padding: 0 4px 6px; }
+.stats-quarters td { text-align: center; padding: 5px 4px; border-top: 1px solid var(--line-soft); }
+.stats-quarters td.team { text-align: left; font-weight: 700; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-quarters td.total { font-weight: 800; color: var(--text); }

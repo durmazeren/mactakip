@@ -1,9 +1,10 @@
 'use strict';
 
-/* Şut / isabetli şut / korner / gol uyarıları. */
+/* Şut / isabetli şut / korner / gol uyarıları. Basketbolda yalnız çeyrek sonu uyarısı:
+ * sayı çok sık değiştiği için her sayıda uyarı vermek gürültü olur. */
 
 const ALERT_ORDER = ['goal', 'sot', 'shot', 'corner'];
-const ALERT_CLASSES = ['alerting', 'alert-goal', 'alert-sot', 'alert-shot', 'alert-corner'];
+const ALERT_CLASSES = ['alerting', 'alert-goal', 'alert-sot', 'alert-shot', 'alert-corner', 'alert-quarter'];
 const ALERT_MS = 5000;
 const GOAL_OVERLAY_MS = 4800;
 const GOAL_THEMES = ['emerald', 'blue', 'violet', 'red', 'gold', 'teal'];
@@ -53,6 +54,8 @@ function showGoalOverlay(id, team, teamId, scoringSide, previousScore) {
 
 function snapshot(id) {
   const ev = state.events.get(id);
+  if (eventSport(ev) === 'basketball') return { basket: true, quarters: basketQuartersDone(ev),
+    finished: ev?.status?.type === 'finished' };
   const all = state.stats.get(id)?.ALL;
   return {
     goal: ev && ev.status?.type !== 'notstarted' ? [ev.homeScore?.current ?? 0, ev.awayScore?.current ?? 0] : null,
@@ -67,6 +70,10 @@ function checkAlerts(id) {
   const cur = snapshot(id);
   snaps.set(id, cur);
   if (!prev) return; // ilk veri: uyarı yok
+  if (cur.basket || prev.basket) {
+    if (cur.basket && prev.basket && (cur.quarters > prev.quarters || (cur.finished && !prev.finished))) fireAlert(id, 'quarter', null, null, cur.quarters);
+    return;
+  }
   for (const kind of ALERT_ORDER) {
     const a = prev[kind], b = cur[kind];
     if (!a || !b) continue;
@@ -75,7 +82,17 @@ function checkAlerts(id) {
   }
 }
 
-function fireAlert(id, kind, side, previousScore) {
+// "2. çeyrek bitti · 23–18 (Skor 41–40)"
+function quarterAlertText(ev, done) {
+  const total = ev?.time?.totalPeriodCount || 4;
+  const halves = total === 2;
+  if (ev?.status?.type === 'finished') return `🏀 Maç bitti · ${scoreText(ev)}`;
+  const h = ev?.homeScore?.[`period${done}`], a = ev?.awayScore?.[`period${done}`];
+  const part = h != null && a != null ? ` · ${h}–${a}` : '';
+  return `🏀 ${done}. ${halves ? 'yarı' : 'çeyrek'} bitti${part} (Skor ${scoreText(ev)})`;
+}
+
+function fireAlert(id, kind, side, previousScore, quarters) {
   const ev = state.events.get(id);
   const team = side === 'home' ? teamName(ev?.homeTeam) : teamName(ev?.awayTeam);
   const text = {
@@ -83,6 +100,7 @@ function fireAlert(id, kind, side, previousScore) {
     sot: `İsabetli şut · ${team}`,
     shot: `Şut · ${team}`,
     corner: `Korner · ${team}`,
+    quarter: kind === 'quarter' ? quarterAlertText(ev, quarters) : '',
   }[kind];
   if (kind === 'goal') {
     const scoringTeam = side === 'home' ? ev?.homeTeam : ev?.awayTeam;

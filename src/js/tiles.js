@@ -230,9 +230,17 @@ function updateTile(id) {
   const pair = (v) => (v ? `${v[0]} – ${v[1]}` : '–');
   $('.tile-foot', node).classList.toggle('no-stats', !!st?.none);
   $('.tile-foot', node).classList.remove('animation-only');
-  $('.shots', node).textContent = pair(all?.shots);
-  $('.sot', node).textContent = pair(all?.sot);
-  $('.corners', node).textContent = pair(all?.corners);
+  // Futbolda şut / isabetli / korner; basketbolda kartta seçili ilk üç istatistik
+  const basket = matchSport(id) === 'basketball';
+  const keys = basket ? state.basketCardStats.slice(0, 3) : ['shots', 'sot', 'corners'];
+  const metrics = cardMetrics(basket ? 'basketball' : 'football');
+  node.querySelectorAll('.tile-foot > span:not(.src)').forEach((span, i) => {
+    const metric = metrics.find((m) => m.key === keys[i]);
+    span.hidden = !metric;
+    if (!metric) return;
+    $('.fl', span).textContent = metric.label;
+    $('.fv', span).textContent = pair(metric.key === 'points' ? basketPoints(ev, 'ALL') : all?.[metric.key]);
+  });
 
   if (ev.status?.type === 'notstarted') {
     if (tile.mode !== 'wait') setStage(tile, 'wait');
