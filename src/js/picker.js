@@ -2,12 +2,19 @@
 
 /* Üstteki arama kutusu: canlı + bugünkü maçlar, lig filtresi, takım araması, link yapıştırma */
 
-// Öne çıkanlarda yalnızca yerel ligler görünür; diğer turnuvalar altta kalır.
+// Yerel ligler her zaman önde; Şampiyonlar Ligi yalnızca fikstür günlerinde en üstte.
 const FEATURED_LEAGUES = [
   [17, 'Premier League'], [8, 'LaLiga'], [35, 'Bundesliga'],
   [23, 'Serie A'], [34, 'Ligue 1'],
   [52, 'Trendyol Süper Lig'], [37, 'Eredivisie'], [238, 'Liga Portugal Betclic'],
 ].map(([id, name], topRank) => ({ id, name, category: '', topRank }));
+const UCL_LEAGUE = { id: 7, name: 'Şampiyonlar Ligi', category: 'Avrupa', topRank: 0 };
+
+function featuredLeaguesForDate() {
+  const local = FEATURED_LEAGUES.map((league) => ({ ...league, topRank: league.topRank + 1 }));
+  return typeof isUclMatchDate === 'function' && isUclMatchDate()
+    ? [UCL_LEAGUE, ...local] : local;
+}
 
 function eventLeagueId(ev) {
   const id = Number(ev?.tournament?.uniqueTournament?.id);
@@ -48,7 +55,7 @@ function collectLeagues(top, scheduled, live, today) {
     if (!old.category && league.category) old.category = league.category;
     if (topRank != null) old.topRank = topRank;
   };
-  FEATURED_LEAGUES.forEach((u) => add(u, null, u.topRank));
+  featuredLeaguesForDate().forEach((u) => add(u, null, u.topRank));
   top.slice(0, 20).forEach((u) => add(u, null));
   for (const ev of live) add(ev.tournament?.uniqueTournament, ev.tournament);
   for (const s of scheduled) add(s.tournament?.uniqueTournament, s.tournament);
@@ -57,20 +64,30 @@ function collectLeagues(top, scheduled, live, today) {
 }
 
 function availableLeagues() {
-  const catalog = state.catalog.leagues.length ? state.catalog.leagues : FEATURED_LEAGUES;
-  const leagues = new Map(catalog.map((league) => [league.id, league]));
+  const featured = featuredLeaguesForDate();
+  const featuredById = new Map(featured.map((league) => [league.id, league]));
+  const catalog = state.catalog.leagues.length ? state.catalog.leagues : featured;
+  const leagues = new Map(catalog.map((league) => {
+    const current = { ...league };
+    delete current.topRank;
+    if (featuredById.has(league.id)) current.topRank = featuredById.get(league.id).topRank;
+    return [league.id, current];
+  }));
+  for (const league of featured) {
+    if (!leagues.has(league.id)) leagues.set(league.id, league);
+  }
   for (const ev of state.searchResults) {
     const league = leagueFrom(ev.tournament?.uniqueTournament, ev.tournament);
     if (league && !leagues.has(league.id)) leagues.set(league.id, league);
   }
   const selected = state.leagueFilter;
   if (selectedLeagueId() && !leagues.has(selectedLeagueId())) {
-    const featured = FEATURED_LEAGUES.find((league) => league.id === selectedLeagueId());
+    const selectedFeatured = featuredById.get(selectedLeagueId());
     leagues.set(selectedLeagueId(), {
       id: selectedLeagueId(),
       name: typeof selected.name === 'string' && selected.name ? selected.name : `Lig #${selectedLeagueId()}`,
       category: typeof selected.category === 'string' ? selected.category : '',
-      ...(featured ? { topRank: featured.topRank } : {}),
+      ...(selectedFeatured ? { topRank: selectedFeatured.topRank } : {}),
     });
   }
   return [...leagues.values()].sort(leagueOrder);

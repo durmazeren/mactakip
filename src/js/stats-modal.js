@@ -69,6 +69,8 @@ const PLAYER_STAT_NAMES = {
   totalProgressiveBallCarriesDistance: 'İleri top taşıma mesafesi',
 };
 const PLAYER_HIDDEN_KEYS = new Set(['ratingVersions', 'statisticsType']);
+const RING_STAT_KEYS = new Set(['duelWonPercent', 'groundDuelsPercentage',
+  'aerialDuelsPercentage', 'dribblesPercentage', 'wonTacklePercent']);
 
 let statsModalMatchId = null;
 let statsModalTab = 'ALL';
@@ -101,16 +103,69 @@ function statNumber(item, side) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
+function statComparisonValue(item, side, hasRing) {
+  const node = el('strong', `stats-${side}`);
+  const text = statValue(item[side], item[side + 'Value']);
+  if (hasRing && /^[\d.,]+\s*%$/.test(text.trim())) return node;
+  const ratio = text.match(/^(.+?)\s*\(\s*([\d.,]+\s*%)\s*\)$/);
+  if (ratio) {
+    node.append(el('span', 'stats-value-main', ratio[1].trim()));
+    if (!hasRing) node.append(el('small', 'stats-value-percent', ratio[2].replace(/\s+/g, '')));
+  } else node.textContent = text;
+  return node;
+}
+
+function statRingCount(item, side) {
+  const text = statValue(item[side], item[side + 'Value']).trim();
+  if (/^[\d.,]+\s*%$/.test(text)) return '';
+  return text.replace(/\s*\(\s*[\d.,]+\s*%\s*\)$/, '');
+}
+
 function renderStatRow(item) {
   const home = statNumber(item, 'home');
   const away = statNumber(item, 'away');
   const max = Math.max(home, away, 1);
+  const hasRing = RING_STAT_KEYS.has(item.key);
   const row = el('div', 'stats-comparison');
+  if (hasRing) {
+    row.append(el('div', 'stats-ring-label stats-label', STAT_NAMES[item.key] || item.name || item.key));
+    const homePercent = statPercentage(item, 'home');
+    const awayPercent = statPercentage(item, 'away');
+    if (item.key === 'duelWonPercent') {
+      const total = homePercent + awayPercent;
+      const ring = el('div', 'stats-ring-shared');
+      ring.setAttribute('role', 'img');
+      ring.setAttribute('aria-label', `Ev sahibi %${Math.round(homePercent)}, deplasman %${Math.round(awayPercent)}`);
+      ring.style.setProperty('--home-share', `${total ? homePercent / total * 100 : 50}%`);
+      ring.append(
+        el('span', 'home', `${Math.round(homePercent)}%`),
+        el('span', 'away', `${Math.round(awayPercent)}%`),
+      );
+      const wrap = el('div', 'stats-ring-shared-wrap');
+      wrap.append(ring);
+      row.append(wrap);
+    } else {
+      const rings = el('div', 'stats-rings');
+      for (const side of ['home', 'away']) {
+        const value = side === 'home' ? homePercent : awayPercent;
+        const pair = el('div', `stats-ring-side ${side}`);
+        const count = statRingCount(item, side);
+        const ring = el('span', `stats-ring ${side}`, `${Math.round(value)}%`);
+        ring.style.setProperty('--ring-value', `${value}%`);
+        if (side === 'home' && count) pair.append(el('strong', 'stats-ring-count', count));
+        pair.append(ring);
+        if (side === 'away' && count) pair.append(el('strong', 'stats-ring-count', count));
+        rings.append(pair);
+      }
+      row.append(rings);
+    }
+    return row;
+  }
   const heading = el('div', 'stats-comparison-heading');
   heading.append(
-    el('strong', 'stats-home', statValue(item.home, item.homeValue)),
+    statComparisonValue(item, 'home', false),
     el('span', 'stats-label', STAT_NAMES[item.key] || item.name || item.key),
-    el('strong', 'stats-away', statValue(item.away, item.awayValue)),
+    statComparisonValue(item, 'away', false),
   );
   row.append(heading);
   if (item.key === 'ballPossession') {
@@ -120,16 +175,6 @@ function renderStatRow(item) {
     first.style.width = `${home / total * 100}%`;
     possession.append(first, el('span', 'away'));
     row.append(possession);
-  } else if (['duelWonPercent', 'groundDuelsPercentage', 'aerialDuelsPercentage',
-    'dribblesPercentage', 'wonTacklePercent'].includes(item.key)) {
-    const rings = el('div', 'stats-rings');
-    for (const side of ['home', 'away']) {
-      const value = statPercentage(item, side);
-      const ring = el('span', `stats-ring ${side}`, `${Math.round(value)}%`);
-      ring.style.setProperty('--ring-value', `${Math.min(100, value)}%`);
-      rings.append(ring);
-    }
-    row.append(rings);
   } else {
     const bars = el('div', 'stats-bars');
     for (const [side, value] of [['home', home], ['away', away]]) {

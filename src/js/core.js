@@ -17,6 +17,40 @@ const TRACKER_URL = (id) => `https://www.sofascore.com/api/v1/event/${id}/live-m
 const MOMENTUM_URL = (id) => `https://widgets.sofascore.com/tr/embed/attackMomentum?id=${id}&widgetTheme=dark`;
 const LOGO_URL = (teamId) => `https://img.sofascore.com/api/v1/team/${teamId}/image`;
 
+// Şut kartı seçenekleri. Tamamı maç için zaten alınan statistics yanıtından okunur.
+const CARD_STATS = [
+  { key: 'shots', label: 'Şut', name: 'Toplam şut', group: 'Şutlar', source: 'totalShotsOnGoal' },
+  { key: 'sot', label: 'İsabetli', name: 'İsabetli şut', group: 'Şutlar', source: 'shotsOnGoal' },
+  { key: 'offTarget', label: 'İsabetsiz', name: 'İsabetsiz şut', group: 'Şutlar', source: 'shotsOffGoal' },
+  { key: 'blocked', label: 'Bloklanan', name: 'Bloklanan şut', group: 'Şutlar', source: 'blockedScoringAttempt' },
+  { key: 'insideBox', label: 'Ceza içi', name: 'Ceza sahası içi şut', group: 'Şutlar', source: 'totalShotsInsideBox' },
+  { key: 'outsideBox', label: 'Ceza dışı', name: 'Ceza sahası dışı şut', group: 'Şutlar', source: 'totalShotsOutsideBox' },
+  { key: 'woodwork', label: 'Direk', name: 'Direkten dönen şut', group: 'Şutlar', source: 'hitWoodwork' },
+  { key: 'xg', label: 'xG', name: 'Beklenen gol (xG)', group: 'Şutlar', source: 'expectedGoals', format: 'decimal' },
+  { key: 'xgot', label: 'xGOT', name: 'İsabetli şut xG', group: 'Şutlar', source: 'expectedGoalsOnTarget', format: 'decimal' },
+  { key: 'bigChances', label: 'Net fırsat', name: 'Net pozisyon', group: 'Şutlar', source: 'bigChanceCreated' },
+  { key: 'missedChances', label: 'Kaçan', name: 'Kaçırılan net pozisyon', group: 'Şutlar', source: 'bigChanceMissed' },
+  { key: 'corners', label: 'Korner', name: 'Korner', group: 'Hücum', source: 'cornerKicks' },
+  { key: 'possession', label: 'Top %', name: 'Topla oynama', group: 'Hücum', source: 'ballPossession', format: 'percent' },
+  { key: 'touchesBox', label: 'Ceza temas', name: 'Rakip ceza sahasında topla buluşma', group: 'Hücum', source: 'touchesInOppBox' },
+  { key: 'finalThird', label: '3. bölge', name: 'Hücum bölgesine giriş', group: 'Hücum', source: 'finalThirdEntries' },
+  { key: 'offsides', label: 'Ofsayt', name: 'Ofsayt', group: 'Hücum', source: 'offsides' },
+  { key: 'throwIns', label: 'Taç', name: 'Taç', group: 'Hücum', source: 'throwIns' },
+  { key: 'goalKicks', label: 'Aut', name: 'Aut atışı', group: 'Hücum', source: 'goalKicks' },
+  { key: 'freeKicks', label: 'Serbest', name: 'Serbest vuruş', group: 'Hücum', source: 'freeKicks' },
+  { key: 'passes', label: 'Pas', name: 'Pas', group: 'Paslar', source: 'passes' },
+  { key: 'accuratePasses', label: 'İs. pas', name: 'İsabetli pas', group: 'Paslar', source: 'accuratePasses' },
+  { key: 'accurateCross', label: 'İs. orta', name: 'İsabetli orta', group: 'Paslar', source: 'accurateCross' },
+  { key: 'fouls', label: 'Faul', name: 'Faul', group: 'Disiplin ve savunma', source: 'fouls' },
+  { key: 'yellowCards', label: 'Sarı kart', name: 'Sarı kart', group: 'Disiplin ve savunma', source: 'yellowCards' },
+  { key: 'redCards', label: 'Kırmızı', name: 'Kırmızı kart', group: 'Disiplin ve savunma', source: 'redCards' },
+  { key: 'tackles', label: 'Müdahale', name: 'Toplam müdahale', group: 'Disiplin ve savunma', source: 'totalTackle' },
+  { key: 'interceptions', label: 'Top kapma', name: 'Top kapma', group: 'Disiplin ve savunma', source: 'interceptionWon' },
+  { key: 'recoveries', label: 'Kazanma', name: 'Top kazanma', group: 'Disiplin ve savunma', source: 'ballRecovery' },
+  { key: 'clearances', label: 'Uzaklaş.', name: 'Uzaklaştırma', group: 'Disiplin ve savunma', source: 'totalClearance' },
+  { key: 'saves', label: 'Kurtarış', name: 'Kaleci kurtarışı', group: 'Disiplin ve savunma', source: 'goalkeeperSaves' },
+];
+
 // Animasyon sayfasını koyu temaya uydurmak için içine eklenen CSS
 const STAGE_CSS = `
   html, body { background: #000 !important; overflow: hidden !important; }
@@ -134,17 +168,25 @@ function scoreText(ev) {
   return `${ev.homeScore?.current ?? 0} - ${ev.awayScore?.current ?? 0}`;
 }
 
-// İstatistikler: toplam şut, isabetli şut, korner (periyot bazında)
+// Kart istatistikleri: aynı Sofascore yanıtını periyot bazında işler.
 function parseStats(json) {
   const out = {};
   for (const block of json?.statistics || []) {
-    const items = block.groups.flatMap((g) => g.statisticsItems);
-    const pick = (key) => {
-      const it = items.find((i) => i.key === key);
+    const items = (block.groups || []).flatMap((g) => g.statisticsItems || []);
+    const byKey = new Map(items.map((item) => [item.key, item]));
+    const pick = (key, format) => {
+      const it = byKey.get(key);
       if (!it) return null;
-      const h = it.homeValue ?? parseInt(it.home, 10);
-      const a = it.awayValue ?? parseInt(it.away, 10);
-      return [Number.isFinite(h) ? h : 0, Number.isFinite(a) ? a : 0];
+      const number = (value) => {
+        const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value).replace(',', '.'));
+        return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+      };
+      const side = (name) => {
+        // Yüzde satırlarında homeValue bazen adet, home metni ise yüzde olabilir.
+        const percent = format === 'percent' && String(it[name] ?? '').match(/([\d.,]+)\s*%/);
+        return number(percent ? percent[1] : it[`${name}Value`] ?? it[name]);
+      };
+      return [side('home'), side('away')];
     };
     // Sofascore değeri 0 olan satırları göndermiyor (ör. isabetli şut 0-0 ise satır yok).
     // Toplam şut = isabetli + isabetsiz + bloklanan; eksik olanı diğerlerinden tamamla.
@@ -155,7 +197,8 @@ function parseStats(json) {
     const z = (v, i) => (v ? v[i] : 0);
     if (!shots && (sot || off || blocked)) shots = [0, 1].map((i) => z(sot, i) + z(off, i) + z(blocked, i));
     if (!sot && shots && (off || blocked)) sot = [0, 1].map((i) => Math.max(0, shots[i] - z(off, i) - z(blocked, i)));
-    out[block.period] = { shots, sot, corners: pick('cornerKicks') };
+    const values = Object.fromEntries(CARD_STATS.map(({ key, source, format }) => [key, pick(source, format)]));
+    out[block.period] = { ...values, shots, sot };
   }
   return out;
 }

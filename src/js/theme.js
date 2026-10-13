@@ -33,7 +33,7 @@ function updateTheme(date = new Date()) {
   button.hidden = !available;
   button.setAttribute('aria-pressed', String(active));
   button.title = active ? 'Klasik görünüme dön' : 'Şampiyonlar Ligi görünümünü aç';
-  document.getElementById('themeToggleLabel').textContent = active ? 'Klasik görünüm' : 'Şampiyonlar Ligi';
+  document.getElementById('themeToggleLabel').textContent = active ? 'Klasik görünüme dön' : 'Temayı aç';
   document.getElementById('statsKicker').textContent = active ? 'MAÇ VERİLERİ' : 'MAÇ İSTATİSTİKLERİ';
   button.dataset.date = available ? today : '';
 }

@@ -4,10 +4,12 @@
  * sadece değerler değişir (açık hedef formu ve yazılan değer kaybolmasın diye). */
 
 const shotCards = new Map(); // id -> { el, refs... }
-const CARD_STATS = [['shots', 'Şut', 'Toplam şut'], ['sot', 'İsabetli', 'İsabetli şut'], ['corners', 'Korner', 'Korner']];
 
 // Kartta hangi istatistiklerin görüneceği (⚙ ayarı)
 const cardStatsVisible = () => state.cardStats;
+const formatCardStat = (value, metric) => value == null ? '–'
+  : metric.format === 'decimal' ? value.toFixed(2)
+    : metric.format === 'percent' ? `${Math.round(value)}%` : String(value);
 
 // Tek satırlık karşılaştırma: 19 ▬▬▬ Şut ▬▬▬ 16
 function cmpRow(label) {
@@ -52,10 +54,10 @@ function ensureCard(id) {
   top.append(title, meta, targetBtn, resetBtn, animBtn, rm);
   const statsBox = el('div', 'sc-stats');
   const rows = {};
-  for (const [key, label, full] of CARD_STATS) {
-    rows[key] = cmpRow(label);
-    rows[key].root.title = full;
-    statsBox.append(rows[key].root);
+  for (const metric of CARD_STATS) {
+    rows[metric.key] = cmpRow(metric.label);
+    rows[metric.key].root.title = metric.name;
+    statsBox.append(rows[metric.key].root);
   }
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');
@@ -95,10 +97,11 @@ function ensureCard(id) {
   return ref;
 }
 
-function setCmp(row, id, key, val) {
+function setCmp(row, id, metric, val) {
+  const key = metric.key;
   const [h, a] = val || [null, null];
-  row.h.textContent = h ?? '–';
-  row.a.textContent = a ?? '–';
+  row.h.textContent = formatCardStat(h, metric);
+  row.a.textContent = formatCardStat(a, metric);
   const max = Math.max(h || 0, a || 0);
   row.hi.style.width = max ? `${((h || 0) / max) * 100}%` : '0%';
   row.ai.style.width = max ? `${((a || 0) / max) * 100}%` : '0%';
@@ -112,7 +115,9 @@ function setCmp(row, id, key, val) {
     const k = `${id}|${state.period}|${key}|${side}`;
     const prev = state.lastShown.get(k);
     if (v != null && prev != null && v !== prev) restartClass(node, 'flash');
-    if (v != null && prev != null && v > prev) restartClass(side === 'h' ? row.hb : row.ab, 'shot-burst');
+    if (metric.format !== 'percent' && v != null && prev != null && v > prev) {
+      restartClass(side === 'h' ? row.hb : row.ab, 'shot-burst');
+    }
     if (v != null) state.lastShown.set(k, v);
   }
 }
@@ -171,14 +176,15 @@ function updateCard(id) {
 
   const all = state.stats.get(id);
   const none = !!all?.none;
-  const visible = cardStatsVisible();
-  c.statsBox.hidden = none || !visible.length;
+  const visible = new Set(cardStatsVisible());
+  c.statsBox.hidden = none || !visible.size;
   c.none.hidden = !none;
   if (!none) {
     const st = all?.[state.period];
-    for (const [key] of CARD_STATS) {
-      c.rows[key].root.hidden = !visible.includes(key);
-      setCmp(c.rows[key], id, key, st?.[key]);
+    for (const metric of CARD_STATS) {
+      const selected = visible.has(metric.key);
+      c.rows[metric.key].root.hidden = !selected;
+      if (selected) setCmp(c.rows[metric.key], id, metric, st?.[metric.key]);
     }
   }
   renderTargets(id, c.targets);
@@ -301,7 +307,7 @@ function renderShotList() {
   let empty = $('.sc-empty', list);
   if (!state.matches.length) {
     if (!empty) {
-      empty = el('div', 'sc-empty', 'Seçtiğin maçların şut, isabetli şut ve korner sayıları burada görünür. Sadece buraya maç eklemek için "+ Maç ekle".');
+      empty = el('div', 'sc-empty', 'Seçtiğin maçların canlı istatistikleri burada görünür. Gösterilecek verileri ⚙ ile seçebilirsin. Sadece buraya maç eklemek için "+ Maç ekle".');
       list.append(empty);
     }
   } else if (empty) {
@@ -314,21 +320,48 @@ function renderShotList() {
 function initCardSettings() {
   const btn = $('#cardCfgBtn');
   const pop = $('#cardCfg');
-  for (const [key, , full] of CARD_STATS) {
+  state.cardStats = Array.isArray(state.cardStats)
+    ? CARD_STATS.map(({ key }) => key).filter((key) => state.cardStats.includes(key))
+    : ['shots', 'sot', 'corners'];
+  pop.replaceChildren();
+  const heading = el('div', 'cfg-heading');
+  heading.append(el('strong', null, 'Kartta göster'));
+  const count = el('span', 'cfg-count');
+  heading.append(count);
+  pop.append(heading);
+  const reset = el('button', 'cfg-reset', 'Varsayılana dön');
+  reset.type = 'button';
+  pop.append(reset);
+  const boxes = new Map();
+  const refresh = (selected) => {
+    state.cardStats = CARD_STATS.map(({ key }) => key).filter((key) => selected.has(key));
+    for (const [key, box] of boxes) box.checked = selected.has(key);
+    count.textContent = `${state.cardStats.length} seçili`;
+    save('cardStats', state.cardStats);
+    renderShotList();
+  };
+  reset.addEventListener('click', () => refresh(new Set(['shots', 'sot', 'corners'])));
+  let group = '';
+  for (const { key, name, group: metricGroup } of CARD_STATS) {
+    if (metricGroup !== group) {
+      group = metricGroup;
+      pop.append(el('div', 'cfg-group', group));
+    }
     const label = el('label', 'cfg-row');
     const box = el('input');
     box.type = 'checkbox';
     box.checked = state.cardStats.includes(key);
+    boxes.set(key, box);
     box.addEventListener('change', () => {
-      state.cardStats = CARD_STATS.map(([k]) => k)
-        .filter((k) => (k === key ? box.checked : state.cardStats.includes(k)));
-      save('cardStats', state.cardStats);
-      renderShotList();
+      const selected = new Set(state.cardStats);
+      if (box.checked) selected.add(key); else selected.delete(key);
+      refresh(selected);
     });
-    label.append(box, el('span', null, full));
+    label.append(box, el('span', null, name));
     pop.append(label);
   }
-  pop.append(el('div', 'pop-title', 'Sıralama'));
+  count.textContent = `${state.cardStats.length} seçili`;
+  pop.append(el('div', 'cfg-group cfg-sort-heading', 'Sıralama'));
   for (const [value, text] of [['manual', 'Elle (kartı sürükle)'], ['auto', 'Otomatik (canlı ve hedefli üstte)']]) {
     const label = el('label', 'cfg-row');
     const radio = el('input');

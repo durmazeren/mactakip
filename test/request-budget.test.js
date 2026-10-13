@@ -42,7 +42,8 @@ function modalContext() {
   const players = new Map([[1, { available: true, loadedAt: Date.now(), list: [], details: new Map() }]]);
   const context = vm.createContext({ state, players, $, console,
     document: { body: new Node() }, shotCards: new Map(),
-    el: (_tag, _className, text) => new Node(text), findMatch: (id) => ({ id, anim: true }),
+    el: (_tag, className, text) => { const node = new Node(text); node.className = className; return node; },
+    findMatch: (id) => ({ id, anim: true }),
     cardOrder: () => [1, 2], teamName: (team) => team?.name || '?', minuteText: () => '', scoreText: () => '0 - 0',
     LOGO_URL: (id) => String(id), closeDropdown() {}, scheduleFit() {},
     api: () => { throw new Error('Panel ek veri isteği attı'); },
@@ -92,6 +93,32 @@ test('yüzde halkası ham adet yerine ekrandaki yüzdeyi veya doğru oranı kull
   assert.equal(vm.runInContext("statPercentage({homeValue: 3, homeTotal: 4}, 'home')", context), 75);
 });
 
+test('oranlı değerler halkada ve çubukta dar alana uygun ayrılır', () => {
+  const { context } = modalContext();
+  const ring = vm.runInContext("statComparisonValue({home: '9/28 (32%)'}, 'home', true)", context);
+  assert.equal(ring.children[0].textContent, '9/28');
+  assert.equal(ring.children.length, 1);
+  const bar = vm.runInContext("statComparisonValue({home: '40/58 (69%)'}, 'home', false)", context);
+  assert.equal(bar.children[0].textContent, '40/58');
+  assert.equal(bar.children[1].textContent, '69%');
+  const percentOnly = vm.runInContext("statComparisonValue({home: '35%'}, 'home', true)", context);
+  assert.equal(percentOnly.textContent, '');
+});
+
+test('mücadele yüzdeleri tek halkada, oranlı değerler halka yanında gösterilir', () => {
+  const { context } = modalContext();
+  const shared = vm.runInContext("renderStatRow({key:'duelWonPercent',home:'33%',away:'67%'})", context);
+  assert.equal(shared.children[0].textContent, 'Kazanılan mücadele');
+  const sharedRing = shared.children[1].children[0];
+  assert.equal(sharedRing.className, 'stats-ring-shared');
+  assert.deepEqual(sharedRing.children.map((node) => node.textContent), ['33%', '67%']);
+  const paired = vm.runInContext("renderStatRow({key:'groundDuelsPercentage',home:'10/32 (31%)',away:'22/32 (69%)'})", context);
+  assert.equal(paired.children[0].textContent, 'Yer mücadelesi');
+  const [home, away] = paired.children[1].children;
+  assert.deepEqual(home.children.map((node) => node.textContent), ['10/32', '31%']);
+  assert.deepEqual(away.children.map((node) => node.textContent), ['69%', '22/32']);
+});
+
 test('genel maç listesi iki istek kullanır; her lig için ayrı fikstür çekilmez', async () => {
   const calls = [];
   const state = { catalog: { live: [], today: [], leagues: [], loadedAt: 0, lastAttemptAt: 0 }, searchResults: [] };
@@ -103,6 +130,24 @@ test('genel maç listesi iki istek kullanır; her lig için ayrı fikstür çeki
   await vm.runInContext('loadCatalog()', context);
   assert.deepEqual(calls, ['sport/football/events/live', 'sport/football/scheduled-events/2026-10-11']);
   assert.equal(state.catalog.leagues.length, 8);
+});
+
+test('Şampiyonlar Ligi yalnız fikstür gününde lig filtresinin en üstündedir', () => {
+  let matchDay = true;
+  const state = { catalog: { leagues: [] }, searchResults: [], leagueFilter: null };
+  class FixtureDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [2026, 9, matchDay ? 13 : 15, 12])); }
+  }
+  const context = vm.createContext({ state, Date: FixtureDate });
+  vm.runInContext(source('theme.js'), context);
+  vm.runInContext(source('picker.js'), context);
+  const matchDayList = vm.runInContext('availableLeagues()', context);
+  assert.equal(matchDayList[0].id, 7);
+  state.catalog.leagues = matchDayList;
+  matchDay = false;
+  const ordinaryList = vm.runInContext('availableLeagues()', context);
+  assert.equal(ordinaryList[0].id, 17);
+  assert.equal(ordinaryList.find((league) => league.id === 7).topRank, undefined);
 });
 
 test('animasyon kurtarması üç aralıklı denemeyle sınırlıdır ve engelde durur', () => {
