@@ -5,9 +5,14 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://img.sofascore.com https://api.sofascore.app data:; style-src 'self' 'unsafe-inline'">
   <title>Maç Takip</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="theme-ucl.css">
 </head>
 <body>
   <header class="topbar">
+    <button id="themeToggle" class="theme-toggle" type="button" hidden aria-label="Şampiyonlar Ligi görünümünü değiştir">
+      <img src="assets/european-night.svg" alt="" aria-hidden="true">
+      <span id="themeToggleLabel"></span>
+    </button>
     <div class="brand"><span class="brand-dot"></span>Maç Takip</div>
     <div class="picker">
       <input id="search" type="text" autocomplete="off" spellcheck="false"
@@ -81,7 +86,7 @@
       <section class="stats-panel">
         <div class="stats-dialog-head">
           <div class="stats-dialog-heading">
-            <span class="stats-dialog-kicker">MAÇ İSTATİSTİKLERİ</span>
+            <span id="statsKicker" class="stats-dialog-kicker">MAÇ İSTATİSTİKLERİ</span>
             <div class="stats-title-row">
               <img id="statsHomeLogo" class="logo" alt="">
               <h2 id="statsTitle"></h2>
@@ -154,6 +159,7 @@
   </template>
 
   <script src="js/core.js"></script>
+  <script src="js/theme.js"></script>
   <script src="js/picker.js"></script>
   <script src="js/layout.js"></script>
   <script src="js/tiles.js"></script>

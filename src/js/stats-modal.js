@@ -139,16 +139,25 @@ function renderStatRow(item) {
       track.append(fill);
       bars.append(track);
     }
-    row.append(bars);
+    const combined = el('div', 'stats-ucl-bar');
+    const total = home + away;
+    for (const [side, value] of [['home', home], ['away', away]]) {
+      const segment = el('span', side);
+      segment.style.width = `${total ? value / total * 100 : 0}%`;
+      combined.append(segment);
+    }
+    row.append(bars, combined);
   }
   return row;
 }
 
 function renderTeamStats(id) {
   const raw = state.statsRaw.get(id);
-  if (!raw) return statsEmpty(state.stats.get(id)?.none
-    ? 'Sofascore bu maç için ayrıntılı istatistik vermiyor.'
-    : 'İstatistikler henüz alınamadı. Mevcut bağlantı durumunu kontrol et.');
+  if (!raw) return statsEmpty(state.events.get(id)?.status?.type === 'notstarted'
+    ? 'Maç başlayınca istatistikler burada görünecek.'
+    : state.stats.get(id)?.none
+      ? 'Sofascore bu maç için ayrıntılı istatistik vermiyor.'
+      : 'İstatistikler henüz alınamadı. Mevcut bağlantı durumunu kontrol et.');
   const block = raw.statistics?.find((item) => item.period === statsModalTab);
   if (!block?.groups?.length) return statsEmpty('Bu dönem için istatistik henüz yok.');
   const container = el('div', 'stats-groups');

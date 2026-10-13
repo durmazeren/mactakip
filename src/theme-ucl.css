@@ -1,0 +1,195 @@
+/* Maç günleri için özgün Avrupa gecesi görünümü. Resmî UEFA grafikleri kullanılmaz. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  flex: none; min-height: 34px; padding: 4px 10px 4px 5px;
+  border: 1px solid rgba(137, 170, 238, .45); border-radius: 9px;
+  background: linear-gradient(125deg, #102765, #071747);
+  color: #f4f8ff; font-size: 11px; font-weight: 750; white-space: nowrap;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .12);
+}
+.theme-toggle:hover { border-color: #a9d6ff; filter: brightness(1.12); }
+.theme-toggle:focus-visible { outline: 2px solid #86caff; outline-offset: 2px; }
+.theme-toggle img { width: 24px; height: 24px; flex: none; }
+.theme-toggle[aria-pressed="true"] { background: rgba(5, 18, 60, .7); border-color: rgba(190, 220, 255, .45); }
+
+body.theme-ucl {
+  --bg: #020b2f;
+  --s1: #071847;
+  --sp: #102861;
+  --s-input: #061437;
+  --line: rgba(163, 202, 255, .4);
+  --line-soft: rgba(163, 202, 255, .18);
+  --text: #f5f8ff;
+  --text-2: rgba(237, 246, 255, .82);
+  --muted: rgba(221, 235, 255, .67);
+  --neutral: #9fb8e4;
+  --primary: #83c8ff;
+  --primary-hl: rgba(91, 171, 255, .24);
+  --home: #65c8ff;
+  --home-hl: rgba(101, 200, 255, .24);
+  --away: #f6c578;
+  --away-hl: rgba(246, 197, 120, .23);
+  font-family: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  background: radial-gradient(ellipse at 35% -25%, #214893 0, transparent 44%), #020b2f;
+}
+
+body.theme-ucl .topbar {
+  position: relative;
+  background: linear-gradient(110deg, #031447 0%, #12347b 49%, #051544 100%);
+  border-bottom: 1px solid rgba(143, 203, 255, .5);
+  box-shadow: inset 0 -2px rgba(43, 104, 219, .4), 0 5px 25px rgba(0, 5, 35, .42);
+}
+body.theme-ucl .topbar::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 25%, rgba(159, 218, 255, .09) 30%, transparent 36%, transparent 70%, rgba(173, 221, 255, .06) 73%, transparent 79%);
+}
+body.theme-ucl .topbar > * { position: relative; z-index: 1; }
+body.theme-ucl .brand { font-weight: 850; letter-spacing: .035em; text-shadow: 0 0 16px rgba(137, 196, 255, .35); }
+body.theme-ucl .brand-dot { background: #a9dcff; box-shadow: 0 0 0 3px rgba(92, 170, 255, .19), 0 0 15px rgba(122, 201, 255, .8); }
+body.theme-ucl #search { border-color: rgba(165, 207, 255, .28); background: rgba(2, 11, 38, .7); }
+body.theme-ucl #search:focus { border-color: #9ed4ff; }
+body.theme-ucl .seg { background: rgba(0, 9, 36, .42); }
+body.theme-ucl .seg button.on { background: #254b9a; box-shadow: inset 0 1px rgba(255, 255, 255, .13); }
+body.theme-ucl .btn { background: #173874; }
+body.theme-ucl .btn-primary { background: #9bd6ff; color: #07153b; }
+body.theme-ucl .dropdown { box-shadow: 0 20px 55px rgba(0, 5, 31, .75); }
+
+body.theme-ucl .grid {
+  background:
+    radial-gradient(ellipse at 19% -8%, rgba(81, 145, 246, .3), transparent 36%),
+    radial-gradient(ellipse at 80% -4%, rgba(90, 110, 221, .26), transparent 39%),
+    linear-gradient(160deg, #051a54, #020b2d 63%);
+}
+body.theme-ucl .grid::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(112deg, transparent 0 185px, rgba(126, 194, 255, .025) 186px 190px);
+}
+body.theme-ucl .empty-icon {
+  width: 72px; height: 72px; margin: auto auto 10px;
+  background: url('assets/european-night.svg') center / contain no-repeat;
+  font-size: 0; opacity: .78;
+}
+body.theme-ucl .empty { justify-content: center; }
+body.theme-ucl .empty-icon { margin: 0 0 12px; }
+body.theme-ucl .tile {
+  border-color: rgba(133, 190, 255, .32);
+  box-shadow: 0 8px 26px rgba(0, 5, 32, .45), inset 0 1px rgba(196, 227, 255, .08);
+}
+body.theme-ucl .tile-head { background: linear-gradient(105deg, #102b71, #0b1c4d); }
+body.theme-ucl .tile-foot { background: #091c4c; }
+body.theme-ucl .score { font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif; font-size: 17px; }
+body.theme-ucl .stage { background: #020715; }
+
+body.theme-ucl .side {
+  background: linear-gradient(180deg, #0c2563 0, #071844 120px, #061438 100%);
+  border-left-color: rgba(135, 193, 255, .32);
+}
+body.theme-ucl .side-head { border-bottom-color: rgba(164, 210, 255, .33); }
+body.theme-ucl .side-head h3 {
+  color: #f9fbff; font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  font-size: 16px; font-weight: 850; letter-spacing: .035em; text-transform: uppercase;
+}
+body.theme-ucl .shot-card {
+  background: linear-gradient(120deg, rgba(23, 55, 124, .95), rgba(10, 31, 81, .96));
+  border-color: rgba(137, 196, 255, .23);
+  box-shadow: inset 0 1px rgba(239, 248, 255, .08);
+}
+body.theme-ucl .shot-card:hover { border-color: rgba(157, 213, 255, .52); }
+body.theme-ucl .shot-card.live { box-shadow: inset 3px 0 0 #ff666b, inset 0 1px rgba(239, 248, 255, .08); }
+body.theme-ucl .shot-card.shot-only { background: #0a1d4c; }
+body.theme-ucl .cmp .val { font-size: 14px; }
+body.theme-ucl .cmp .bar { background: rgba(182, 213, 255, .17); }
+body.theme-ucl .cmp .bar.home { --shot-glow: rgba(101, 200, 255, .85); }
+body.theme-ucl .cmp .bar.away { --shot-glow: rgba(246, 197, 120, .8); }
+body.theme-ucl .side-foot { background: #051338; }
+
+body.theme-ucl .stats-backdrop { background: #030b2a; }
+body.theme-ucl .stats-dialog {
+  --s1: #ffffff;
+  --text: #1c2b36;
+  --text-2: #586776;
+  --muted: #667686;
+  --line: rgba(20, 49, 98, .2);
+  --line-soft: rgba(20, 49, 98, .12);
+  --primary: #1641d6;
+  --primary-hl: rgba(22, 65, 214, .13);
+  --home: #173ee1;
+  --away: #58cdd6;
+  background: #f3f5f9;
+  border-color: rgba(165, 214, 255, .46);
+  box-shadow: 0 22px 70px rgba(0, 3, 27, .68);
+}
+body.theme-ucl .stats-dialog-head {
+  position: relative; overflow: hidden;
+  background: radial-gradient(ellipse at 62% -60%, rgba(132, 199, 255, .44), transparent 55%),
+    linear-gradient(115deg, #173c92 0, #071e60 72%, #071744 100%);
+  border-bottom-color: rgba(174, 217, 255, .36);
+  color: #fff;
+}
+body.theme-ucl .stats-dialog-head::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(113deg, transparent 6%, rgba(205, 232, 255, .09) 14%, transparent 24%, transparent 55%, rgba(183, 219, 255, .08) 61%, transparent 69%);
+}
+body.theme-ucl .stats-dialog-head > * { position: relative; }
+body.theme-ucl .stats-dialog-kicker {
+  color: #c8eaff; font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  font-size: 12px; font-weight: 850; letter-spacing: .2em;
+}
+body.theme-ucl .stats-title-row h2 { font-size: 20px; font-weight: 800; }
+body.theme-ucl .stats-dialog-head .stats-dialog-meta { color: rgba(244, 250, 255, .78); }
+body.theme-ucl .stats-dialog-head .icon-btn { color: #eaf6ff; }
+body.theme-ucl .stats-dialog-body {
+  background: #f3f5f9;
+  scrollbar-color: #9eb6d4 transparent;
+}
+body.theme-ucl .stats-view-tabs { background: #fff; }
+body.theme-ucl .stats-dialog-tabs { background: #f3f5f9; }
+body.theme-ucl .stats-dialog-tabs button,
+body.theme-ucl .stats-player-switch button { background: #e4e9f1; color: #455365; }
+body.theme-ucl .stats-dialog-tabs button.on,
+body.theme-ucl .stats-player-switch button.on { color: #fff; background: #1641d6; }
+body.theme-ucl .stats-groups { display: flex; flex-direction: column; gap: 14px; padding-top: 16px; }
+body.theme-ucl .stats-group {
+  padding: 14px 17px 10px; border: 1px solid #dfe5ef; border-radius: 13px;
+  background: #fff; box-shadow: 0 4px 17px rgba(17, 42, 87, .06);
+}
+body.theme-ucl .stats-group:first-child {
+  border-top: 3px solid #1641d6;
+}
+body.theme-ucl .stats-group h3 {
+  margin-bottom: 6px; color: #152b53; font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  font-size: 17px; font-weight: 800; letter-spacing: .02em;
+}
+body.theme-ucl .stats-comparison { padding: 11px 0; border-bottom: 1px solid #edf0f5; }
+body.theme-ucl .stats-comparison:last-child { border-bottom: 0; }
+body.theme-ucl .stats-comparison-heading { grid-template-columns: 72px minmax(0, 1fr) 72px; }
+body.theme-ucl .stats-comparison-heading strong {
+  font-family: "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  font-size: 20px; font-weight: 800; line-height: 1;
+}
+body.theme-ucl .stats-label {
+  color: #526475; font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 12px; font-weight: 550;
+}
+body.theme-ucl .stats-bars { display: none; }
+body.theme-ucl .stats-ucl-bar { display: flex; gap: 3px; height: 4px; margin-top: 9px; overflow: hidden; }
+body.theme-ucl .stats-ucl-bar span { display: block; height: 100%; border-radius: 3px; }
+body.theme-ucl .stats-ucl-bar .home { background: var(--home); }
+body.theme-ucl .stats-ucl-bar .away { background: var(--away); }
+body.theme-ucl .stats-possession { height: 4px; border-radius: 3px; }
+body.theme-ucl .stats-ring { color: #173454; background: radial-gradient(circle at center, #fff 56%, transparent 58%), conic-gradient(var(--home) var(--ring-value), #e1e6ef 0); }
+body.theme-ucl .stats-ring.away { background: radial-gradient(circle at center, #fff 56%, transparent 58%), conic-gradient(var(--away) var(--ring-value), #e1e6ef 0); }
+body.theme-ucl .stats-match-nav { background: #fff; }
+body.theme-ucl .stats-player-switch { background: #e4e9f1; }
+body.theme-ucl .stats-player-detail { background: #fff; }
+body.theme-ucl .stats-player-picker-list .stats-lineup-player,
+body.theme-ucl .stats-bench .stats-lineup-player { background: #e9eef5; color: #1c2b36; }
+
+@media (max-width: 1340px) {
+  .theme-toggle { width: 36px; padding: 4px; }
+  .theme-toggle span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.theme-ucl .shot-card, body.theme-ucl .stats-group { transition: none; }
+}

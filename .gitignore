@@ -2,3 +2,11 @@ node_modules/
 dist/
 .DS_Store
 Thumbs.db
+
+# Bu makinede kalan calisma dosyalari
+.env.*
+.local/
+docs/
+tools/
+_to_delete/
+sofa-debug.log

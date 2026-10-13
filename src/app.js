@@ -347,6 +347,7 @@ function initConnection() {
 }
 
 function init() {
+  initTheme();
   initConnection();
   initPicker();
   initLayout();

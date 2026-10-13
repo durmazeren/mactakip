@@ -585,6 +585,7 @@ body.stats-open .stats-preview-active .close { display: none !important; }
 .stats-away { text-align: right; }
 .stats-label { text-align: center; color: var(--text-2); line-height: 1.3; }
 .stats-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 9px; }
+.stats-ucl-bar { display: none; }
 .stats-track { display: flex; height: 6px; border-radius: 8px; background: #30373b; overflow: hidden; }
 .stats-track.home { justify-content: flex-end; }
 .stats-track i { display: block; height: 100%; background: var(--home); border-radius: inherit; }
