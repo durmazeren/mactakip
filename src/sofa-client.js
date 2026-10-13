@@ -46,6 +46,7 @@ function createSofaClient({ fetch, now = Date.now, onState = () => {} }) {
     const res = await fetch(API_BASE + path, {
       headers: { Accept: 'application/json', Referer: 'https://www.sofascore.com/' },
       credentials: 'include',
+      cache: 'no-store', // tarayıcı önbelleği eski (ör. maç öncesi 404) yanıt vermesin
       signal: AbortSignal.timeout(8_000),
     });
     const cloudflare = res.headers.get('cf-mitigated') === 'challenge';

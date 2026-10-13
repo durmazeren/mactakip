@@ -112,6 +112,7 @@ function removeMatch(id) {
   state.statsRaw.delete(id);
   players.delete(id);
   state.lastPoll.delete(id);
+  statsBustAt.delete(id);
   delete state.layout.free[id];
   state.layout.z = state.layout.z.filter((x) => x !== id);
   if (state.layout.focus === id) state.layout.focus = null;
@@ -137,7 +138,8 @@ async function resetMatch(id) {
     tile.graph = null;
     tile.mode = null; // updateTile animasyonu baştan kurar
   }
-  const ok = await pollOne(id);
+  statsBustAt.delete(id);
+  const ok = await pollOne(id, true);
   renderShotList();
   buttons.forEach((b) => b.classList.remove('spinning'));
   const ev = state.events.get(id);
@@ -171,13 +173,32 @@ function needsPoll(id) {
   return true;
 }
 
-async function pollOne(id) {
+/* Sofascore maç başlamadan istenen istatistiğe 404 döner ve bu yanıt sunucu
+ * önbelleğinde maç başladıktan sonra da kalabiliyor. Canlı maçta 404 gelirse aynı
+ * istek önbelleği atlayan bir parametreyle tekrarlanır (maç başına dakikada en fazla bir). */
+const STATS_BUST_MS = 60_000;
+const statsBustAt = new Map();
+
+async function freshStats(id, force = false) {
+  const last = statsBustAt.get(id) || 0;
+  if (!force && Date.now() - last < STATS_BUST_MS) return null;
+  statsBustAt.set(id, Date.now());
+  return api(`event/${id}/statistics?_=${Date.now()}`).catch(() => undefined);
+}
+
+async function pollOne(id, force = false) {
   const animationOnly = !!findMatch(id)?.animationOnly;
-  const [evRes, stRes] = await Promise.all([
+  let [evRes, stRes] = await Promise.all([
     api(`event/${id}`).catch(() => undefined),
-    animationOnly ? null : api(`event/${id}/statistics`).catch(() => undefined),
+    animationOnly ? null : (force ? freshStats(id, true) : api(`event/${id}/statistics`).catch(() => undefined)),
     !animationOnly && needsPlayers(id) ? loadPlayers(id) : null,
   ]);
+  if (!findMatch(id)) return true;
+  const started = (evRes?.event || state.events.get(id))?.status?.type;
+  if (!animationOnly && !force && stRes === null && started && started !== 'notstarted') {
+    const fresh = await freshStats(id);
+    if (fresh) stRes = fresh;
+  }
   if (!findMatch(id)) return true;
   if (evRes?.event) {
     state.events.set(id, evRes.event);
