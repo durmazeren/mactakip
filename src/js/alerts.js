@@ -3,8 +3,8 @@
 /* Şut / isabetli şut / korner / gol uyarıları. Basketbolda yalnız çeyrek sonu uyarısı:
  * sayı çok sık değiştiği için her sayıda uyarı vermek gürültü olur. */
 
-const ALERT_ORDER = ['goal', 'sot', 'shot', 'corner'];
-const ALERT_CLASSES = ['alerting', 'alert-goal', 'alert-sot', 'alert-shot', 'alert-corner', 'alert-quarter'];
+const ALERT_ORDER = ['goal', 'red', 'sot', 'shot', 'corner'];
+const ALERT_CLASSES = ['alerting', 'alert-goal', 'alert-red', 'alert-sot', 'alert-shot', 'alert-corner', 'alert-quarter'];
 const ALERT_MS = 5000;
 const GOAL_OVERLAY_MS = 4800;
 const GOAL_THEMES = ['emerald', 'blue', 'violet', 'red', 'gold', 'teal'];
@@ -59,6 +59,7 @@ function snapshot(id) {
   const all = state.stats.get(id)?.ALL;
   return {
     goal: ev && ev.status?.type !== 'notstarted' ? [ev.homeScore?.current ?? 0, ev.awayScore?.current ?? 0] : null,
+    red: all ? (all.redCards || [0, 0]) : null,  // Sofascore 0 satırını göndermez
     sot: all?.sot || null,
     shot: all?.shots || null,
     corner: all?.corners || null,
@@ -100,11 +101,16 @@ function fireAlert(id, kind, side, previousScore, quarters) {
     sot: `İsabetli şut · ${team}`,
     shot: `Şut · ${team}`,
     corner: `Korner · ${team}`,
+    red: `🟥 Kırmızı kart · ${team}`,
     quarter: kind === 'quarter' ? quarterAlertText(ev, quarters) : '',
   }[kind];
   if (kind === 'goal') {
     const scoringTeam = side === 'home' ? ev?.homeTeam : ev?.awayTeam;
     showGoalOverlay(id, team, scoringTeam?.id, side, previousScore);
+  }
+  // Ses ve masaüstü bildirimi (ayarlar: üst bardaki 🔔)
+  if (typeof alertEvent === 'function' && kind !== 'shot') {
+    alertEvent(kind, kind === 'goal' ? `⚽ GOL! ${team}` : text, matchLine(ev), id);
   }
   for (const node of [state.tiles.get(id)?.el, shotCards.get(id)?.el]) {
     if (!node) continue;

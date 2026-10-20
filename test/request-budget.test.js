@@ -130,25 +130,21 @@ test('genel maç listesi iki istek kullanır; her lig için ayrı fikstür çeki
   await vm.runInContext('loadCatalog()', context);
   await vm.runInContext('loadCatalog()', context);
   assert.deepEqual(calls, ['sport/football/events/live', 'sport/football/scheduled-events/2026-10-11']);
-  assert.equal(state.catalog.leagues.length, 8);
+  assert.equal(state.catalog.leagues.length, vm.runInContext('FEATURED_LEAGUES.length', context));
 });
 
-test('Şampiyonlar Ligi yalnız fikstür gününde lig filtresinin en üstündedir', () => {
-  let matchDay = true;
-  const state = { catalog: { leagues: [] }, searchResults: [], leagueFilter: null };
-  class FixtureDate extends Date {
-    constructor(...args) { super(...(args.length ? args : [2026, 9, matchDay ? 13 : 15, 12])); }
-  }
-  const context = vm.createContext({ state, Date: FixtureDate });
-  vm.runInContext(source('theme.js'), context);
+test('lig filtresi: Türkiye ligleri önde, sabit sıra, diğer ligler listede yok, eski seçim korunur', () => {
+  const nigeria = { id: 9999, name: 'NPFL', category: 'Nigeria' };
+  const state = { pickerSport: 'football', catalog: { leagues: [nigeria] }, searchResults: [], leagueFilter: null };
+  const context = vm.createContext({ state });
   vm.runInContext(source('picker.js'), context);
-  const matchDayList = vm.runInContext('availableLeagues()', context);
-  assert.equal(matchDayList[0].id, 7);
-  state.catalog.leagues = matchDayList;
-  matchDay = false;
-  const ordinaryList = vm.runInContext('availableLeagues()', context);
-  assert.equal(ordinaryList[0].id, 17);
-  assert.equal(ordinaryList.find((league) => league.id === 7).topRank, undefined);
+  const list = vm.runInContext('availableLeagues()', context);
+  assert.deepEqual(JSON.parse(JSON.stringify(list.slice(0, 7).map((l) => l.id))), [52, 98, 17, 35, 8, 34, 23]);
+  assert.ok(list.every((l) => l.flag), 'her ligin bayrağı var');
+  assert.ok(!list.some((l) => l.id === 9999), 'katalogdaki diğer lig listede yok');
+  state.leagueFilter = nigeria;
+  const withOld = vm.runInContext('availableLeagues()', context);
+  assert.equal(withOld[withOld.length - 1].id, 9999, 'önceden seçilmiş lig kaybolmaz');
 });
 
 test('animasyon kurtarması üç aralıklı denemeyle sınırlıdır ve engelde durur', () => {

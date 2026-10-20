@@ -1,14 +1,25 @@
 'use strict';
 
 /* Kupon takibi.
- * Takım hedefi: maç + taraf + istatistik (şut / isabetli / korner) + periyot + üst/alt + barem.
+ * Takım hedefi: maç + taraf + istatistik (gol, şut, korner, faul, kart, taç, aut… şut kartının okuduğu her şey)
+ *   + periyot + üst/alt + barem.
  * Oyuncu hedefi: maç + oyuncu + istatistik (şut / isabetli) + üst/alt + barem (maç sonu).
  * Üst: değer baremi geçtiği an tuttu (yeşil), sayaç artmaya devam eder.
  * Alt: değer baremi geçtiği an yattı; periyot bitince altta kaldıysa tuttu.
  * Oyuncu oyundan çıkarsa (değişiklik / kırmızı kart) hedefi o an kapanır. */
 
-const TARGET_STATS = { shots: 'şut', sot: 'isabetli şut', corners: 'korner',
+// Futbol takım hedefi: gol (skordan) + şut kartının okuduğu bütün istatistikler (aynı statistics yanıtı)
+const TARGET_STATS = {
+  goals: 'gol',
+  ...Object.fromEntries(CARD_STATS.map(({ key, name }) => [key, name.toLocaleLowerCase('tr')])),
+  shots: 'şut', sot: 'isabetli şut', corners: 'korner',
   points: 'sayı', threes: "3'lük", rebounds: 'ribaund', assists: 'asist', turnovers: 'top kaybı' };
+// Seçim listesi grupları: Gol en üstte, sonra şut kartındaki gruplar (oran / yüzde satırları hariç)
+const FOOTBALL_TEAM_TARGETS = [['Gol', [['goals', 'Gol']]],
+  ...[...new Set(CARD_STATS.map((m) => m.group))].map((group) => [group,
+    CARD_STATS.filter((m) => m.group === group && m.format !== 'percent').map((m) => [m.key, m.name])])];
+// Sofascore 0 olan satırı göndermez: maçın o periyot istatistiği varsa eksik sayım satırı 0 sayılır
+const ZERO_WHEN_MISSING = new Set(CARD_STATS.filter((m) => !m.format).map((m) => m.key));
 const TARGET_PERIODS = { ALL: 'Maç', '1ST': '1. yarı', '2ND': '2. yarı',
   Q1: '1. çeyrek', Q2: '2. çeyrek', Q3: '3. çeyrek', Q4: '4. çeyrek' };
 /* Basketbol: maç ve 2. yarı uzatmalar dahil, çeyrekler uzatma hariç (bahis sitelerinin
@@ -61,6 +72,15 @@ function teamValue(t) {
     if (!pair) return ev ? null : undefined;
     return t.side === 'home' ? pair[0] : t.side === 'away' ? pair[1] : pair[0] + pair[1];
   }
+  if (t.stat === 'goals') {
+    if (!ev?.homeScore || !ev?.awayScore) return ev ? null : undefined;
+    const goals = (score) => t.period === '1ST' ? score.period1 ?? (ev.status?.code === 6 ? score.current : null)
+      : t.period === '2ND' ? (score.period2 ?? ([6, 31].includes(ev.status?.code) ? 0 : (score.current ?? 0) - (score.period1 ?? 0)))
+        : score.normaltime ?? score.current;
+    const h = goals(ev.homeScore), a = goals(ev.awayScore);
+    if (h == null || a == null) return null;
+    return t.side === 'home' ? h : t.side === 'away' ? a : h + a;
+  }
   const st = state.stats.get(t.matchId);
   if (!st) return undefined;
   if (st.none) return null;
@@ -70,7 +90,10 @@ function teamValue(t) {
     const code = state.events.get(t.matchId)?.status?.code;
     return t.period === '2ND' && [6, 31].includes(code) ? 0 : null;
   }
-  const pair = p[t.stat];
+  let pair = p[t.stat];
+  // Satır yoksa sayım 0'dır (Sofascore 0 satırını göndermez) — ama yalnız o periyotta şut verisi varsa,
+  // yoksa bu lig için istatistik tutulmuyor demektir
+  if (!pair && ZERO_WHEN_MISSING.has(t.stat) && (p.shots || p.sot || p.corners)) pair = [0, 0];
   if (!pair) return null;
   if (t.side === 'home') return pair[0];
   if (t.side === 'away') return pair[1];
@@ -122,6 +145,10 @@ function targetRow(t, sub) {
   state.targetStatus.set(t.id, r.status);
   const row = el('div', `target ${r.status}`);
   if (r.status === 'won' && prev && prev !== 'won') row.classList.add('just-won');
+  if (prev && prev !== r.status && (r.status === 'won' || r.status === 'lost') && typeof alertEvent === 'function') {
+    alertEvent(r.status === 'won' ? 'targetWon' : 'targetLost', `${r.status === 'won' ? '🎯 Hedef tuttu' : '✗ Hedef yattı'} · ${targetLabel(t)}`,
+      matchLine(state.events.get(t.matchId)), t.matchId);
+  }
   const label = el('span', 't-label', targetLabel(t));
   label.title = label.textContent;
   const del = el('button', 'icon-btn', '✕');
@@ -245,6 +272,18 @@ function openTargetForm(matchId) {
     s.replaceChildren(...opts.map(([v, text]) => Object.assign(el('option', null, text), { value: v })));
     s.value = opts.some(([v]) => v === old) ? old : fallback ?? opts[0][0];
   };
+  // Gruplu liste: [[grup adı, [[değer, yazı], ...]], ...]
+  const fillGroups = (s, groups, fallback) => {
+    const old = s.value;
+    s.replaceChildren(...groups.filter(([, opts]) => opts.length).map(([label, opts]) => {
+      const g = el('optgroup');
+      g.label = label;
+      g.append(...opts.map(([v, text]) => Object.assign(el('option', null, text), { value: v })));
+      return g;
+    }));
+    const all = groups.flatMap(([, opts]) => opts);
+    s.value = all.some(([v]) => v === old) ? old : fallback ?? all[0][0];
+  };
   let formSport = null;
   const dirSel = select([['over', 'Üst'], ['under', 'Alt']], 'over');
   const lineIn = el('input');
@@ -318,9 +357,9 @@ function openTargetForm(matchId) {
       if (formSport !== null) sideSel.value = basket ? 'total' : 'home';
       formSport = sport;
     }
-    fillSelect(statSel, basket ? (player ? BASKET_PLAYER_STATS : BASKET_TEAM_STATS)
-      : player ? [['shots', 'Toplam şut'], ['sot', 'İsabetli şut']]
-        : [['shots', 'Toplam şut'], ['sot', 'İsabetli şut'], ['corners', 'Korner']], basket ? 'points' : 'sot');
+    if (!basket && !player) fillGroups(statSel, FOOTBALL_TEAM_TARGETS, 'sot');
+    else fillSelect(statSel, basket ? (player ? BASKET_PLAYER_STATS : BASKET_TEAM_STATS)
+      : [['shots', 'Toplam şut'], ['sot', 'İsabetli şut']], basket ? 'points' : 'sot');
     // Basketbolda yarı/çeyrek yalnız sayı için; diğer istatistikler maç sonu
     fillSelect(periodSel, basket ? (statSel.value === 'points' ? BASKET_PERIODS : BASKET_PERIODS.slice(0, 1))
       : [['ALL', 'Maç sonu'], ['1ST', '1. yarı'], ['2ND', '2. yarı']]);

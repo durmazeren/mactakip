@@ -49,7 +49,10 @@ function ensureCard(id) {
   const resetBtn = el('button', 'icon-btn reset-btn', '↻');
   resetBtn.title = 'Bu maçı yenile (veriyi ve animasyonu baştan yükle)';
   resetBtn.addEventListener('click', () => resetMatch(id));
-  top.append(title, meta, targetBtn, resetBtn, animBtn, rm);
+  // Az kullanılan düğmeler (ses, yenile, animasyon) yalnız kartın üstüne gelince görünür
+  const spk = speakerButton(id);
+  for (const b of [spk, resetBtn, animBtn]) b.classList.add('sc-hover');
+  top.append(title, meta, targetBtn, spk, resetBtn, animBtn, rm);
   const statsBox = el('div', 'sc-stats');
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');

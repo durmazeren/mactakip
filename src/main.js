@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, net, shell, session, Notification } = require('electron');
 const path = require('path');
 const { createSofaClient, SOFA_PARTITION } = require('./sofa-client');
 
@@ -8,6 +8,7 @@ const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
 let win = null;
 let sofaClient = null;
 let sofaWindow = null;
+let soundBoardWin = null;
 
 // Geliştirme/test için ayrı veri klasörü (açık olan asıl uygulamanın listesine dokunmamak için)
 if (process.env.MT_USER_DATA) app.setPath('userData', process.env.MT_USER_DATA);
@@ -39,6 +40,10 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, 'index.html'));
+  win.on('closed', () => {
+    if (soundBoardWin && !soundBoardWin.isDestroyed()) soundBoardWin.close();
+    if (toastWin && !toastWin.isDestroyed()) toastWin.close();
+  });
 
   // Animasyon içindeki linkler uygulamanın içinde değil, tarayıcıda açılsın
   win.webContents.on('did-attach-webview', (_e, wc) => {
@@ -73,6 +78,20 @@ ipcMain.handle('sofa:open', () => {
   sofaWindow.on('closed', () => { sofaWindow = null; });
   sofaWindow.loadURL('https://www.sofascore.com/').catch(() => {});
 });
+
+// Ses panosu: ayrı, küçük pencere. Maç izlerken yanda açık kalır; kapatmak ana uygulamayı kapatmaz.
+ipcMain.handle('soundboard:open', () => {
+  if (soundBoardWin && !soundBoardWin.isDestroyed()) { soundBoardWin.show(); soundBoardWin.focus(); return; }
+  soundBoardWin = new BrowserWindow({
+    width: 600, height: 720, minWidth: 340, minHeight: 300, title: 'Ses panosu', backgroundColor: '#121a24',
+    autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+  });
+  soundBoardWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  soundBoardWin.on('closed', () => { soundBoardWin = null; });
+  soundBoardWin.loadFile(path.join(__dirname, 'soundboard.html'));
+});
+ipcMain.handle('soundboard:pin', (_e, on) => { if (soundBoardWin && !soundBoardWin.isDestroyed()) soundBoardWin.setAlwaysOnTop(!!on, 'floating'); });
 
 /* ---------- Güncelleme (isteğe bağlı) ----------
  * Windows: electron-updater ile indirip kurar (kullanıcı onaylarsa).
@@ -133,8 +152,60 @@ ipcMain.handle('update:install', () => {
 });
 ipcMain.handle('app:version', () => app.getVersion());
 
+// Masaüstü bildirimi (gol, kırmızı kart, hedef sonucu). Ses uygulamanın kendi ayarından çalınır; sistem sesi kapalı.
+// Tıklanınca pencere öne gelir ve ilgili maç gösterilir.
+// Sağ alt bildirim penceresi: uygulama arka plandayken gol gibi olaylarda masaüstünde (işletim sistemi bildirimi
+// izni / Odaklanma modu gerekmeden) görünür. Odağı çalmaz, 7 sn sonra kaybolur; tıklanınca maça gider.
+let toastWin = null;
+function showToast(payload) {
+  const { screen } = require('electron');
+  const W = 380, H = 104;
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  if (!toastWin || toastWin.isDestroyed()) {
+    toastWin = new BrowserWindow({ width: W, height: H, frame: false, transparent: true, resizable: false, movable: false,
+      alwaysOnTop: true, skipTaskbar: true, focusable: false, show: false, hasShadow: false, fullscreenable: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+    toastWin.setAlwaysOnTop(true, 'screen-saver');
+    toastWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    toastWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    toastWin.loadFile(path.join(__dirname, 'toast.html'));
+  }
+  toastWin.setBounds({ x: area.x + area.width - W - 12, y: area.y + area.height - H - 12, width: W, height: H });
+  const send = () => { toastWin.showInactive(); toastWin.webContents.send('toast:show', payload); };
+  if (toastWin.webContents.isLoading()) toastWin.webContents.once('did-finish-load', send); else send();
+}
+ipcMain.handle('toast:done', () => { if (toastWin && !toastWin.isDestroyed()) toastWin.hide(); });
+ipcMain.handle('toast:open', (_e, matchId) => {
+  if (toastWin && !toastWin.isDestroyed()) toastWin.hide();
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  win.webContents.send('notify:click', matchId ?? null);
+});
+
+ipcMain.handle('notify', (_e, payload) => {
+  if (!payload || typeof payload.title !== 'string') return false;
+  if (win && !win.isDestroyed() && !win.isFocused()) {  // arka planda: kendi penceremiz (her platformda aynı)
+    try { showToast({ title: payload.title.slice(0, 80), body: String(payload.body || '').slice(0, 160), matchId: payload.matchId ?? null }); return true; }
+    catch { /* olmazsa işletim sistemi bildirimine düş */ }
+  }
+  if (!Notification.isSupported()) return false;
+  const n = new Notification({ title: payload.title.slice(0, 120), body: String(payload.body || '').slice(0, 240), silent: true });
+  n.on('click', () => {
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('notify:click', payload.matchId ?? null);
+  });
+  n.show();
+  return true;
+});
+
 app.whenReady().then(() => {
   if (!primaryInstance) return;
+  if (process.platform === 'win32') app.setAppUserModelId('com.mactakip.app'); // Windows bildirimleri için
   const sofaSession = session.fromPartition(SOFA_PARTITION);
   sofaClient = createSofaClient({ fetch: (url, options) => sofaSession.fetch(url, options),
     onState: (state) => { if (win && !win.isDestroyed()) win.webContents.send('sofa:status', state); } });

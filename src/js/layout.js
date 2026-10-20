@@ -242,7 +242,7 @@ function syncLayoutControls() {
   document.body.classList.toggle('free', mode === 'free');
   for (const b of $('#layoutSeg').children) b.classList.toggle('on', b.dataset.layout === mode);
   for (const b of $('#arrangeSeg').children) b.classList.toggle('on', b.dataset.arrange === (state.layout.arrange || 'auto'));
-  $('#arrangeSeg').hidden = mode !== 'grid';
+  $('#arrangeSeg').hidden = $('#arrangeTitle').hidden = mode !== 'grid';
   $('#resetFree').hidden = mode !== 'free';
 }
 

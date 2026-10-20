@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://img.sofascore.com https://api.sofascore.app data:; style-src 'self' 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://img.sofascore.com https://api.sofascore.app data:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:">
   <title>Maç Takip</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="theme-ucl.css">
@@ -22,16 +22,23 @@
         placeholder="Takım ara veya Sofascore maç linki yapıştır…">
       <div id="dropdown" class="dropdown" hidden></div>
     </div>
-    <div class="seg" id="layoutSeg" title="Animasyon yerleşimi">
-      <button data-layout="grid" class="on">Izgara</button>
-      <button data-layout="free">Serbest</button>
+    <div class="menu-wrap">
+      <button id="viewMenuBtn" class="btn btn-sm menu-btn" type="button" aria-haspopup="true" aria-expanded="false">Görünüm ▾</button>
+      <div id="viewMenu" class="popover top-menu" hidden>
+        <div class="pop-title">Yerleşim</div>
+        <div class="seg" id="layoutSeg">
+          <button data-layout="grid" class="on" title="Kutular ekrana otomatik dizilir">Izgara</button>
+          <button data-layout="free" title="Kutuları sürükleyip istediğin gibi boyutlandır">Serbest</button>
+        </div>
+        <div class="pop-title" id="arrangeTitle">Dizilim</div>
+        <div class="seg" id="arrangeSeg">
+          <button data-arrange="auto" class="on" title="Animasyonları en büyük gösterir; uygun kutularda yan boşluğu kullanır">Oto</button>
+          <button data-arrange="row" title="Maçlar yan yana">Yan yana</button>
+          <button data-arrange="col" title="Maçlar alt alta">Alt alta</button>
+        </div>
+        <button id="resetFree" class="btn btn-sm" hidden title="Serbest düzeni ızgaraya göre sıfırla">Düzeni sıfırla</button>
+      </div>
     </div>
-    <div class="seg" id="arrangeSeg" title="Izgara dizilimi">
-      <button data-arrange="auto" class="on" title="Animasyonları en büyük gösterir; uygun kutularda yan boşluğu kullanır">Oto</button>
-      <button data-arrange="row" title="Maçlar yan yana">Yan yana</button>
-      <button data-arrange="col" title="Maçlar alt alta">Alt alta</button>
-    </div>
-    <button id="resetFree" class="btn btn-sm" hidden title="Serbest düzeni ızgaraya göre sıfırla">Düzeni sıfırla</button>
     <div class="topbar-right">
       <div id="update" class="update" hidden>
         <span id="updateText"></span>
@@ -39,6 +46,11 @@
         <button id="updateClose" class="icon-btn" title="Şimdilik kapat">✕</button>
       </div>
       <span id="status" class="status"></span>
+      <div class="snd-wrap snd-split">
+        <button id="masterSoundBtn" class="icon-btn snd-top" title="Sesler"></button>
+        <button id="soundBtn" class="icon-btn snd-caret" title="Ses panosu, bildirimler ve olay sesleri" aria-haspopup="true">▾</button>
+        <div id="soundPop" class="snd-pop" hidden></div>
+      </div>
       <button id="fsBtn" class="icon-btn fs-btn" title="Tam ekran (F)">⛶</button>
       <button id="toggleSide" class="btn btn-sm" title="Şut ekranını aç/kapat">Şut ekranı</button>
     </div>
@@ -56,9 +68,8 @@
       <div id="guideH" class="guide h" hidden></div>
       <div id="fsHint" class="fs-hint" hidden>Çıkmak için Esc veya F</div>
       <div id="empty" class="empty">
-        <div class="empty-icon">📺</div>
         <h2>Henüz maç seçilmedi</h2>
-        <p></p>
+        <p>Yukarıdaki kutuya takım adı yaz ya da Sofascore maç linkini yapıştır.</p>
       </div>
     </section>
 
@@ -78,7 +89,7 @@
       </div>
       <div id="couponBar" class="coupon-bar" hidden></div>
       <div id="shotList" class="shot-list"></div>
-      <div class="side-foot"><span>Her 10 sn'de güncellenir</span><span id="appVersion"></span></div>
+      <div class="side-foot"><span id="appVersion"></span></div>
     </aside>
   </main>
 
@@ -99,6 +110,7 @@
           </div>
           <button id="statsClose" class="icon-btn stats-dialog-close" aria-label="İstatistikleri kapat">✕</button>
         </div>
+        <div class="stats-tabs-row">
         <div id="statsViews" class="stats-view-tabs" role="tablist" aria-label="İstatistik görünümü">
           <button data-stats-view="team" class="on" role="tab">İstatistikler</button>
           <button data-stats-view="players" role="tab">Oyuncular</button>
@@ -107,6 +119,7 @@
           <button data-stats-tab="ALL" class="on" role="tab">Tümü</button>
           <button data-stats-tab="1ST" role="tab">1. yarı</button>
           <button data-stats-tab="2ND" role="tab">2. yarı</button>
+        </div>
         </div>
         <div id="statsBody" class="stats-dialog-body"></div>
         <div class="stats-match-nav">
@@ -121,16 +134,21 @@
   <template id="tileTpl">
     <article class="tile">
       <div class="tile-head">
-        <button class="icon-btn switch-match" title="Bu animasyondaki maçı değiştir" aria-label="Bu animasyondaki maçı değiştir">⇄</button>
         <div class="teams">
           <span class="team-pair home-pair"><img class="logo home-logo" alt=""><span class="home-name"></span></span>
           <span class="score">–</span>
           <span class="team-pair away-pair"><img class="logo away-logo" alt=""><span class="away-name"></span></span>
         </div>
         <span class="minute"></span>
-        <button class="icon-btn reset-btn" title="Bu maçı yenile (veriyi ve animasyonu baştan yükle)">↻</button>
         <button class="icon-btn focus-btn" title="Odak modu: bu maçı büyüt">⤢</button>
-        <button class="icon-btn to-shot" title="Animasyonu kapat (sadece şut ekranında kalsın)">▭</button>
+        <div class="tile-more">
+          <button class="icon-btn more-btn" title="Diğer işlemler" aria-haspopup="true">⋯</button>
+          <div class="tile-menu" hidden>
+            <button class="switch-match">⇄ Maçı değiştir</button>
+            <button class="reset-btn">↻ Yenile</button>
+            <button class="to-shot">▭ Yalnız şut ekranında tut</button>
+          </div>
+        </div>
         <button class="icon-btn close" title="Maçı kaldır">✕</button>
       </div>
       <div class="stage">
@@ -170,6 +188,7 @@
   <script src="js/coupon.js"></script>
   <script src="js/shots.js"></script>
   <script src="js/stats-modal.js"></script>
+  <script src="js/sounds.js"></script>
   <script src="js/alerts.js"></script>
   <script src="app.js"></script>
 </body>

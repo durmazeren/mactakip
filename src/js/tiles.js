@@ -33,6 +33,16 @@ function createTile(id, preview = false) {
   $('.focus-btn', node).addEventListener('click', () => toggleFocus(id));
   $('.reset-btn', node).addEventListener('click', () => resetMatch(id));
   const head = $('.tile-head', node);
+  head.insertBefore(speakerButton(id), $('.focus-btn', node));
+  // Az kullanılan işlemler "⋯" menüsünde (maçı değiştir, yenile, yalnız şut ekranında tut)
+  const menu = $('.tile-menu', node);
+  $('.more-btn', node).addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    document.querySelectorAll('.tile-menu').forEach((m) => { m.hidden = true; });
+    menu.hidden = !open;
+  });
+  menu.addEventListener('click', (e) => { if (e.target.closest('button')) menu.hidden = true; });
   head.addEventListener('pointerdown', (e) => { if (!tile.preview) startDrag(e, tile); });
   head.addEventListener('dblclick', (e) => { if (!tile.preview && !e.target.closest('button')) toggleFocus(id); });
   for (const h of node.querySelectorAll('.rh')) {
@@ -83,7 +93,6 @@ function setStage(tile, mode) {
       el('b', null, `Başlama ${minuteText(ev)}`),
       el('span', null, 'Animasyon maç başlayınca kendiliğinden açılır'),
     );
-    $('.src', tile.el).textContent = '';
     if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
     return;
   }
@@ -96,7 +105,6 @@ function setStage(tile, mode) {
     tile.timers.push(setInterval(() => {
       if (isLive(state.events.get(tile.id))) loadBoardGraph(tile);
     }, BOARD_GRAPH_MS));
-    $('.src', tile.el).textContent = 'Skor paneli';
     if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
     return;
   }
@@ -156,9 +164,16 @@ function setStage(tile, mode) {
   }
   stage.append(wv);
   tile.webview = wv;
-  // Widget içeriği yüklendikçe boyu değişiyor; birkaç saniyede bir yeniden sığdır
-  tile.timers.push(setInterval(() => fitTile(tile), 3000));
-  $('.src', tile.el).textContent = mode === 'tracker' ? 'Canlı animasyon' : 'Atak grafiği';
+  // Widget içeriği yüklendikçe boyu değişiyor: ilk 30 sn 3 sn'de bir, sonra 15 sn'de bir yeniden sığdır
+  // (kutu boyu değişince ResizeObserver zaten hemen sığdırıyor)
+  let fits = 0;
+  const refit = () => {
+    if (!tile.el.isConnected || tile.webview !== wv) return;
+    fitTile(tile);
+    tile.fitLoop = setTimeout(refit, ++fits < 10 ? 3000 : 15000);
+  };
+  clearTimeout(tile.fitLoop);
+  tile.fitLoop = setTimeout(refit, 3000);
   if (!tile.preview && state.layout.mode === 'grid' && !state.layout.focus && state.layout.arrange === 'auto') applyLayout(false);
 }
 

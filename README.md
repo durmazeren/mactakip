@@ -54,11 +54,12 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - Animasyonlu en fazla 12, toplam 30 maç. Seçilen maçlar, hedefler ve düzen kapatıp açınca hatırlanır.
 
 **Animasyon ekranı**
-- **Izgara:** üst bardan dizilim seçilir: **Oto** (animasyonları en büyük gösterir; uygun kutularda alt istatistikleri yan boşluğa alır), **Yan yana**, **Alt alta**.
+- **Görünüm ▾** menüsü (üst bar): yerleşim (Izgara / Serbest) ve dizilim.
+- **Izgara:** dizilim seçilir: **Oto** (animasyonları en büyük gösterir; uygun kutularda alt istatistikleri yan boşluğa alır), **Yan yana**, **Alt alta**.
 - **Odak modu:** kutudaki ⤢ düğmesi (veya başlığa çift tıklama) o maçı büyütür; diğerleri yanda/altta küçülür ama odaktakinin en az yarı boyunda kalır. Tekrar ⤡ ya da Esc ile çıkılır.
 - **Serbest:** kutuları başlığından tutup sürükle; dört kenarından ve dört köşesinden boyutlandır. Alanın kenarlarına, yarım / üçte bir / çeyrek çizgilerine ve diğer kutulara yapışır (yapıştığı yerde kılavuz çizgisi görünür). "Düzeni sıfırla" ızgaraya döner.
 - **Tam ekran:** üst bardaki ⛶ düğmesi veya **F** tuşu; üst bar ve şut ekranı gizlenir. Esc veya F ile çıkılır.
-- Başlığın solundaki **⇄** ile o kutudaki maçı değiştir; eski maç şut ekranında ve hedeflerde kalır. Logolar takım adlarının yanındadır.
+- Kutu başlığında yalnız 🔊 (maçın sesi), ⤢ (büyüt), **⋯** ve ✕ görünür. **⋯** menüsünde: **Maçı değiştir** (eski maç şut ekranında ve hedeflerde kalır), **Yenile**, **Yalnız şut ekranında tut**.
 - Başlamamış maçta animasyon başlama saatinde kendiliğinden açılır; animasyonu olmayan veya biten maçlarda atak grafiği gösterilir.
 
 **Şut ekranı**
@@ -70,8 +71,7 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
   - **Otomatik:** hedefli canlı maçlar üstte, sonra canlı, başlamamış ve en altta küçülmüş halde biten maçlar.
 - Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
 - Gol olunca şut kartı birkaç saniyeliğine tam boy bir gol animasyonuna dönüşür; ardından istatistik ve hedefler kaldığı yerden görünür.
-- ▷ / ▶ ile maçın animasyonu açılır/kapanır.
-- ↻ (kartta ve animasyon kutusunda): veri gelmiyor ya da animasyon takıldıysa o maçı baştan yükler.
+- Kartın üstüne gelince ses, ↻ ve ▷ / ▶ düğmeleri görünür: ▷ / ▶ maçın animasyonunu açar/kapatır; ↻ veri gelmiyor ya da animasyon takıldıysa o maçı baştan yükler.
 - Sofascore değeri 0 olan satırları göndermediği için eksik şut / isabetli şut, diğer şut satırlarından hesaplanır.
 
 **Kupon takibi**
@@ -80,6 +80,12 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
   - Oyuncu: maçın kadrosundan oyuncu (ilk 11 / yedekler), şut veya isabetli şut, üst/alt ve barem (maç sonu). Tüm oyuncu hedefleri şut ekranının en altında "Oyuncu hedefleri" bölümünde listelenir; oyuncunun durumu (sahada, yedek, oyundan çıktı) yazar. Oyuncu oyundan çıkarsa veya kırmızı kart görürse hedefi o an sonuçlanır.
 - Üst hedef baremi geçince yeşile döner ("Tuttu"), sayaç artmaya devam eder. Alt hedef baremi aşınca kırmızıya döner. Periyot bitince tutmayanlar "Yattı" olur.
 - Şut ekranının üstünde kuponun özeti: kaç hedef tuttu, yattı, devam ediyor.
+
+**Ses ve bildirimler**
+- Üst bardaki 🔊 bütün sesleri açar/kapatır; yanındaki **▾** menüsünde ses panosu, olay sesleri ve bildirim ayarları var.
+- Maçta gol olunca **Gol** sesi çalar. Her maçın sesi kutusundaki/kartındaki 🔊 ile ayrı ayarlanır.
+- **Masaüstü gol bildirimi:** uygulama arka plandayken gol olursa ekranın sağ altında küçük bir kart çıkar (7 sn). Tıklayınca Maç Takip açılır ve o maça gider. Bildirim ayarlarındaki **Masaüstü bildirimini dene** ile 3 saniye sonra örnek kart gösterilir.
+- **Ses panosu** ayrı pencerede açılır (📌 ile her zaman üstte kalır): Spor, Eğlence ve kendi eklediğin sesler. ☆ ile favorilere ekle (en üstte görünür), sesleri sürükleyerek sırala, 🗑 ile kaldır (hazır sesler alttaki bağlantıyla geri gelir), ✎ ile adını değiştir. Panonun kendi ses seviyesi var; çalan butona tekrar basınca durur.
 
 **Güncelleme**
 - Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta "Güncelle" → "Yeniden başlat ve kur". Mac'te yeni sürümün indirme sayfası açılır.

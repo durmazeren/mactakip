@@ -2,23 +2,59 @@
 
 /* Üstteki arama kutusu: canlı + bugünkü maçlar, lig filtresi, takım araması, link yapıştırma */
 
-// Yerel ligler her zaman önde; Şampiyonlar Ligi yalnızca fikstür günlerinde en üstte.
+// Lig filtresinde yalnız bu ligler gösterilir (bu sırayla); Avrupa kupaları yalnız maç günlerinde. Diğer liglerin maçları "Tüm ligler" seçiliyken
+// takım, lig ya da ülke adıyla aranarak yine bulunur.
 const FEATURED_LEAGUES = [
-  [17, 'Premier League'], [8, 'LaLiga'], [35, 'Bundesliga'],
-  [23, 'Serie A'], [34, 'Ligue 1'],
-  [52, 'Trendyol Süper Lig'], [37, 'Eredivisie'], [238, 'Liga Portugal Betclic'],
-].map(([id, name], topRank) => ({ id, name, category: '', topRank }));
-const UCL_LEAGUE = { id: 7, name: 'Şampiyonlar Ligi', category: 'Avrupa', topRank: 0 };
+  [52, 'Trendyol Süper Lig', 'Türkiye', 'tr'], [98, 'Trendyol 1. Lig', 'Türkiye', 'tr'],
+  [17, 'Premier League', 'İngiltere', 'gb-eng'], [35, 'Bundesliga', 'Almanya', 'de'],
+  [8, 'LaLiga', 'İspanya', 'es'], [34, 'Ligue 1', 'Fransa', 'fr'], [23, 'Serie A', 'İtalya', 'it'],
+  [7, 'Şampiyonlar Ligi', 'Avrupa', 'eu'], [679, 'Avrupa Ligi', 'Avrupa', 'eu'], [17015, 'Konferans Ligi', 'Avrupa', 'eu'],
+  [37, 'Eredivisie', 'Hollanda', 'nl'], [238, 'Liga Portugal', 'Portekiz', 'pt'], [38, 'Pro League', 'Belçika', 'be'],
+  [36, 'Premiership', 'İskoçya', 'gb-sct'], [18, 'Championship', 'İngiltere', 'gb-eng'],
+  [44, '2. Bundesliga', 'Almanya', 'de'], [54, 'LaLiga 2', 'İspanya', 'es'], [182, 'Ligue 2', 'Fransa', 'fr'],
+  [53, 'Serie B', 'İtalya', 'it'], [45, 'Bundesliga', 'Avusturya', 'at'], [215, 'Super League', 'İsviçre', 'ch'],
+  [185, 'Super League', 'Yunanistan', 'gr'], [39, 'Superliga', 'Danimarka', 'dk'], [202, 'Ekstraklasa', 'Polonya', 'pl'],
+  [172, '1. Lig', 'Çekya', 'cz'],
+].map(([id, name, category, flag], topRank) => ({ id, name, category, flag, topRank }));
 const BASKET_FEATURED_LEAGUES = [
-  [132, 'NBA', 'ABD'], [138, 'EuroLeague', 'Avrupa'], [519, 'Basketbol Süper Ligi', 'Türkiye'],
-  [141, 'EuroCup', 'Avrupa'], [9357, 'Şampiyonlar Ligi', 'FIBA'], [486, 'WNBA', 'ABD'],
-].map(([id, name, category], topRank) => ({ id, name, category, topRank }));
+  [132, 'NBA', 'ABD', 'us'], [138, 'EuroLeague', 'Avrupa', 'eu'], [519, 'Basketbol Süper Ligi', 'Türkiye', 'tr'],
+  [141, 'EuroCup', 'Avrupa', 'eu'], [9357, 'Şampiyonlar Ligi', 'FIBA', 'world'], [486, 'WNBA', 'ABD', 'us'],
+].map(([id, name, category, flag], topRank) => ({ id, name, category, flag, topRank }));
 
-function featuredLeaguesForDate() {
+// Avrupa kupaları yalnız kendi maç günlerinde listede (takvim theme.js UEFA_MATCH_DATES)
+function featuredLeaguesForDate(date = new Date()) {
   if (state.pickerSport === 'basketball') return BASKET_FEATURED_LEAGUES;
-  const local = FEATURED_LEAGUES.map((league) => ({ ...league, topRank: league.topRank + 1 }));
-  return typeof isUclMatchDate === 'function' && isUclMatchDate()
-    ? [UCL_LEAGUE, ...local] : local;
+  return typeof isUefaMatchDate === 'function'
+    ? FEATURED_LEAGUES.filter((league) => isUefaMatchDate(league.id, date)) : FEATURED_LEAGUES;
+}
+
+// Ülke bayrakları uygulamaya gömülü (Windows bayrak emojisini göstermez; ek ağ isteği yok)
+const FLAG_SVG = {
+  tr: '<rect width="30" height="20" fill="#e30a17"/><circle cx="11" cy="10" r="5" fill="#fff"/><circle cx="12.25" cy="10" r="4" fill="#e30a17"/><polygon fill="#fff" points="15.60,10.00 17.35,9.38 17.40,7.53 18.52,9.00 20.30,8.47 19.25,10.00 20.30,11.53 18.52,11.00 17.40,12.47 17.35,10.62"/>',
+  'gb-eng': '<rect width="30" height="20" fill="#fff"/><rect x="13" width="4" height="20" fill="#ce1124"/><rect y="8" width="30" height="4" fill="#ce1124"/>',
+  'gb-sct': '<rect width="30" height="20" fill="#005eb8"/><path d="M0 0L30 20M30 0L0 20" stroke="#fff" stroke-width="3.2"/>',
+  de: '<rect width="30" height="20" fill="#ffce00"/><rect width="30" height="13.33" fill="#dd0000"/><rect width="30" height="6.67" fill="#000"/>',
+  es: '<rect width="30" height="20" fill="#aa151b"/><rect y="5" width="30" height="10" fill="#f1bf00"/>',
+  fr: '<rect width="30" height="20" fill="#ef4135"/><rect width="20" height="20" fill="#fff"/><rect width="10" height="20" fill="#0055a4"/>',
+  it: '<rect width="30" height="20" fill="#ce2b37"/><rect width="20" height="20" fill="#fff"/><rect width="10" height="20" fill="#009246"/>',
+  nl: '<rect width="30" height="20" fill="#21468b"/><rect width="30" height="13.33" fill="#fff"/><rect width="30" height="6.67" fill="#ae1c28"/>',
+  pt: '<rect width="30" height="20" fill="#da291c"/><rect width="12" height="20" fill="#046a38"/><circle cx="12" cy="10" r="3.6" fill="#ffe900"/>',
+  be: '<rect width="30" height="20" fill="#ef3340"/><rect width="20" height="20" fill="#fdda24"/><rect width="10" height="20" fill="#000"/>',
+  at: '<rect width="30" height="20" fill="#ed2939"/><rect y="6.67" width="30" height="6.67" fill="#fff"/>',
+  ch: '<rect width="30" height="20" fill="#d52b1e"/><rect x="13" y="4" width="4" height="12" fill="#fff"/><rect x="9" y="8" width="12" height="4" fill="#fff"/>',
+  gr: '<rect width="30" height="20" fill="#0d5eaf"/><path d="M0 3.33h30M0 10h30M0 16.67h30" stroke="#fff" stroke-width="2.22"/><rect width="11.1" height="11.1" fill="#0d5eaf"/><path d="M5.55 0v11.1M0 5.55h11.1" stroke="#fff" stroke-width="2.22"/>',
+  dk: '<rect width="30" height="20" fill="#c8102e"/><rect x="9" width="3" height="20" fill="#fff"/><rect y="8.5" width="30" height="3" fill="#fff"/>',
+  pl: '<rect width="30" height="20" fill="#dc143c"/><rect width="30" height="10" fill="#fff"/>',
+  cz: '<rect width="30" height="20" fill="#d7141a"/><rect width="30" height="10" fill="#fff"/><path d="M0 0L15 10L0 20Z" fill="#11457e"/>',
+  eu: '<rect width="30" height="20" fill="#039"/><g fill="#fc0"><circle cx="21" cy="10" r=".9"/><circle cx="20.2" cy="13" r=".9"/><circle cx="18" cy="15.2" r=".9"/><circle cx="15" cy="16" r=".9"/><circle cx="12" cy="15.2" r=".9"/><circle cx="9.8" cy="13" r=".9"/><circle cx="9" cy="10" r=".9"/><circle cx="9.8" cy="7" r=".9"/><circle cx="12" cy="4.8" r=".9"/><circle cx="15" cy="4" r=".9"/><circle cx="18" cy="4.8" r=".9"/><circle cx="20.2" cy="7" r=".9"/></g>',
+  us: '<rect width="30" height="20" fill="#b22234"/><path d="M0 2.3h30M0 5.4h30M0 8.5h30M0 11.6h30M0 14.7h30M0 17.8h30" stroke="#fff" stroke-width="1.54"/><rect width="13" height="10.8" fill="#3c3b6e"/>',
+  world: '<rect width="30" height="20" fill="#2b3a4a"/><circle cx="15" cy="10" r="6.5" fill="none" stroke="#9fb3c8" stroke-width="1.2"/><path d="M8.5 10h13M15 3.5c-3 3.5-3 9.5 0 13M15 3.5c3 3.5 3 9.5 0 13" fill="none" stroke="#9fb3c8" stroke-width="1"/>',
+};
+
+function flagIcon(code) {
+  const box = el('span', 'dd-flag');
+  box.innerHTML = `<svg viewBox="0 0 30 20" preserveAspectRatio="none" aria-hidden="true">${FLAG_SVG[code] || FLAG_SVG.world}</svg>`;
+  return box;
 }
 
 function eventLeagueId(ev) {
@@ -69,33 +105,18 @@ function collectLeagues(top, scheduled, live, today) {
 }
 
 function availableLeagues() {
-  const featured = featuredLeaguesForDate();
-  const featuredById = new Map(featured.map((league) => [league.id, league]));
-  const catalog = state.catalog.leagues.length ? state.catalog.leagues : featured;
-  const leagues = new Map(catalog.map((league) => {
-    const current = { ...league };
-    delete current.topRank;
-    if (featuredById.has(league.id)) current.topRank = featuredById.get(league.id).topRank;
-    return [league.id, current];
-  }));
-  for (const league of featured) {
-    if (!leagues.has(league.id)) leagues.set(league.id, league);
-  }
-  for (const ev of state.searchResults) {
-    const league = leagueFrom(ev.tournament?.uniqueTournament, ev.tournament);
-    if (league && !leagues.has(league.id)) leagues.set(league.id, league);
-  }
+  const featured = featuredLeaguesForDate().map((league) => ({ ...league }));
   const selected = state.leagueFilter;
-  if (selectedLeagueId() && !leagues.has(selectedLeagueId())) {
-    const selectedFeatured = featuredById.get(selectedLeagueId());
-    leagues.set(selectedLeagueId(), {
+  if (selectedLeagueId() && !featured.some((league) => league.id === selectedLeagueId())) {
+    // Eski sürümde listeden seçilmiş başka bir lig: seçim kaybolmasın, listede görünsün
+    featured.push({
       id: selectedLeagueId(),
       name: typeof selected.name === 'string' && selected.name ? selected.name : `Lig #${selectedLeagueId()}`,
       category: typeof selected.category === 'string' ? selected.category : '',
-      ...(selectedFeatured ? { topRank: selectedFeatured.topRank } : {}),
+      flag: selected.flag || 'world',
     });
   }
-  return [...leagues.values()].sort(leagueOrder);
+  return featured;
 }
 
 function leagueLabel(league) {
@@ -156,7 +177,7 @@ async function loadCatalog(force = false) {
   })().finally(() => {
     c.loading = null;
     if (typeof document !== 'undefined' && state.catalog === c && !$('#dropdown').hidden
-      && document.activeElement?.id !== 'leagueFilter') renderDropdown();
+      && !state.leagueListOpen) renderDropdown();
   });
   return c.loading;
 }
@@ -265,29 +286,30 @@ function renderLeagueFilter(dd) {
     sports.append(b);
   }
   row.append(sports);
-  const label = el('label', 'dd-league-label', 'Lig');
-  const select = el('select', 'dd-league-select');
-  label.htmlFor = select.id = 'leagueFilter';
-  select.setAttribute('aria-label', 'Lig filtresi');
-  const all = el('option', null, 'Tüm ligler');
-  all.value = '';
-  select.append(all);
+  const label = el('span', 'dd-league-label', 'Lig');
   const leagues = availableLeagues();
-  const topGroup = el('optgroup');
-  topGroup.label = 'Öne çıkan ligler';
-  const otherGroup = el('optgroup');
-  otherGroup.label = 'Diğer ligler';
-  for (const league of leagues) {
-    const option = el('option', null, leagueLabel(league));
-    option.value = String(league.id);
-    (Number.isInteger(league.topRank) ? topGroup : otherGroup).append(option);
-  }
-  if (topGroup.children.length) select.append(topGroup);
-  if (otherGroup.children.length) select.append(otherGroup);
-  select.value = selectedLeagueId() ? String(selectedLeagueId()) : '';
-  select.addEventListener('change', () => {
-    const league = leagues.find((item) => item.id === Number(select.value));
-    state.leagueFilter = league || null;
+  const current = leagues.find((league) => league.id === selectedLeagueId());
+  const button = el('button', 'dd-league-btn' + (state.leagueListOpen ? ' open' : ''));
+  button.type = 'button';
+  button.id = 'leagueFilter';
+  button.setAttribute('aria-label', 'Lig filtresi');
+  button.setAttribute('aria-expanded', String(!!state.leagueListOpen));
+  button.append(flagIcon(current ? current.flag : 'world'), el('span', 'dd-league-name', current ? current.name : 'Tüm ligler'));
+  if (current?.category) button.append(el('small', null, current.category));
+  button.append(el('span', 'dd-caret', '▾'));
+  // mousedown + preventDefault: odak arama kutusunda kalır, liste kapanmaz
+  button.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    state.leagueListOpen = !state.leagueListOpen;
+    renderDropdown();
+  });
+  row.append(label, button);
+  dd.append(row);
+  if (!state.leagueListOpen) return;
+
+  const choose = (league) => {
+    state.leagueFilter = league ? { id: league.id, name: league.name, category: league.category, flag: league.flag } : null;
+    state.leagueListOpen = false;
     save(leagueFilterKey(), state.leagueFilter);
     updateSearchPlaceholder();
     renderDropdown();
@@ -295,9 +317,25 @@ function renderLeagueFilter(dd) {
     if (league) loadLeagueMatches(league.id).then(() => {
       if (!$('#dropdown').hidden && selectedLeagueId() === league.id) renderDropdown();
     });
-  });
-  row.append(label, select);
-  dd.append(row);
+  };
+  const list = el('div', 'dd-league-list');
+  list.setAttribute('role', 'listbox');
+  for (const league of [null, ...leagues]) {
+    const on = league ? league.id === selectedLeagueId() : !selectedLeagueId();
+    const item = el('button', 'dd-league-item' + (on ? ' on' : ''));
+    item.type = 'button';
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(on));
+    item.append(flagIcon(league ? league.flag : 'world'), el('span', 'dd-league-name', league ? league.name : 'Tüm ligler'));
+    if (league?.category) item.append(el('small', null, league.category));
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      choose(league);
+    });
+    list.append(item);
+  }
+  dd.append(list);
+  if (!state.leagueFilter) dd.append(el('div', 'dd-hint', 'Listede olmayan ligler: "Tüm ligler" seçiliyken takım, lig ya da ülke adıyla ara.'));
 }
 
 function renderDropdown() {
@@ -419,6 +457,7 @@ function openPicker(mode) {
 
 function closeDropdown() {
   $('#dropdown').hidden = true;
+  state.leagueListOpen = false;
   state.replaceMatchId = null;
   state.addMode = 'anim';
   updateSearchPlaceholder();

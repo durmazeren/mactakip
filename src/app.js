@@ -302,6 +302,22 @@ function toggleFullscreen() {
 
 function initFullscreen() {
   $('#fsBtn').addEventListener('click', toggleFullscreen);
+  // Görünüm menüsü (yerleşim + dizilim) ve açık kutu menüleri: dışarı tıklayınca / Esc ile kapanır
+  const viewMenu = $('#viewMenu'), viewBtn = $('#viewMenuBtn');
+  viewBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    viewMenu.hidden = !viewMenu.hidden;
+    viewBtn.setAttribute('aria-expanded', String(!viewMenu.hidden));
+  });
+  const closeMenus = () => {
+    viewMenu.hidden = true;
+    viewBtn.setAttribute('aria-expanded', 'false');
+    document.querySelectorAll('.tile-menu').forEach((m) => { m.hidden = true; });
+  };
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#viewMenu, .tile-more')) closeMenus();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
   const hint = $('#fsHint');
   let hintTimer = null;
   document.addEventListener('fullscreenchange', () => {
@@ -382,6 +398,9 @@ function initConnection() {
 
 function init() {
   initTheme();
+  initSoundSettings();
+  initMasterSpeaker();
+  initSoundBoard();
   initConnection();
   initPicker();
   initLayout();
