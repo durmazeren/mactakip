@@ -10,6 +10,8 @@ const { createBoxSources } = require('./box-sources');
 
 const REPO = 'durmazeren/mactakip';
 const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
+// CI, Mac sürümünü Developer ID ile imzalayıp notarize ettiğinde package.json'a macAutoUpdate ekler.
+const MAC_AUTO_UPDATE = process.platform === 'darwin' && String(require('../package.json').macAutoUpdate) === 'true';
 
 let win = null;
 let sofaClient = null;
@@ -128,9 +130,10 @@ ipcMain.handle('soundboard:open', () => {
 ipcMain.handle('soundboard:pin', (_e, on) => { if (soundBoardWin && !soundBoardWin.isDestroyed()) soundBoardWin.setAlwaysOnTop(!!on, 'floating'); });
 
 /* ---------- Güncelleme (isteğe bağlı) ----------
- * Windows: electron-updater ile indirip kurar (kullanıcı onaylarsa).
- * Mac: uygulama imzasız olduğu için kendini güncelleyemez; yeni sürümün
- * indirme sayfasını açar. Kaynak koddan çalışırken (npm start) devre dışı. */
+ * Windows ve imzalı Mac: electron-updater ile indirip kurar (kullanıcı onaylarsa).
+ * İmzasız Mac kendini güncelleyemez; yeni sürümün indirme sayfasını açar. İmzalı
+ * Mac'te electron-updater hata verirse (ör. yeni sürüm imzasız) aynı yola döner.
+ * Kaynak koddan çalışırken (npm start) devre dışı. */
 
 const sendUpdate = (payload) => win?.webContents.send('update:status', payload);
 let updater = null;
@@ -148,7 +151,7 @@ function newer(a, b) {
 async function checkForUpdates() {
   if (!app.isPackaged) return;
   try {
-    if (process.platform === 'win32') {
+    if (updater) {
       await updater.checkForUpdates();
       return;
     }
@@ -167,14 +170,17 @@ async function checkForUpdates() {
 }
 
 function setupUpdater() {
-  if (!app.isPackaged || process.platform !== 'win32') return;
+  if (!app.isPackaged || (process.platform !== 'win32' && !MAC_AUTO_UPDATE)) return;
   ({ autoUpdater: updater } = require('electron-updater'));
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = true;
   updater.on('update-available', (info) => sendUpdate({ state: 'available', version: info.version, manual: false }));
   updater.on('download-progress', (p) => sendUpdate({ state: 'downloading', percent: Math.round(p.percent) }));
   updater.on('update-downloaded', (info) => sendUpdate({ state: 'ready', version: info.version }));
-  updater.on('error', (err) => sendUpdate({ state: 'error', message: err?.message || String(err) }));
+  updater.on('error', (err) => {
+    if (process.platform === 'darwin') { updater = null; checkForUpdates(); return; } // indirme sayfasına dön
+    sendUpdate({ state: 'error', message: err?.message || String(err) });
+  });
 }
 
 ipcMain.handle('update:download', async () => {

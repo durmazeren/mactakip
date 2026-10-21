@@ -2,6 +2,8 @@
 # yoksa Windows ve Mac kurulum dosyalarını derleyip yeni sürüm olarak yayınlar.
 # Uygulama açılışta bu sürümleri kontrol eder ve isteğe bağlı güncelleme sunar.
 # Yeni sürüm çıkarmak için: package.json "version" alanını artır ve push et.
+# Mac imzası: CSC_LINK, CSC_KEY_PASSWORD ve APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER
+# (ya da APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) sırları tanımlıysa yapılır.
 name: Release
 
 on:
@@ -58,7 +60,54 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder ${{ matrix.target }} --publish never
+      - if: runner.os == 'Windows'
+        run: npx electron-builder ${{ matrix.target }} --publish never
+      # Mac: sertifika + notarize sırları varsa Developer ID ile imzalanır, Apple'a
+      # onaylatılır ve uygulama içi tek tıkla güncelleme açılır (macAutoUpdate).
+      # Sırlar yoksa ya da eksikse bugünkü gibi imzasız derlenir; yayın durmaz.
+      - if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          MAC_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          MAC_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          MAC_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+          MAC_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          MAC_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          signed=false
+          if [ -n "$MAC_CSC_LINK" ]; then
+            if [ -n "$MAC_API_KEY" ] && [ -n "$MAC_API_KEY_ID" ] && [ -n "$MAC_API_ISSUER" ]; then
+              key="$RUNNER_TEMP/AuthKey_${MAC_API_KEY_ID}.p8"
+              printf '%s\n' "$MAC_API_KEY" > "$key"
+              export APPLE_API_KEY="$key" APPLE_API_KEY_ID="$MAC_API_KEY_ID" APPLE_API_ISSUER="$MAC_API_ISSUER"
+              signed=true
+            elif [ -n "$MAC_APPLE_ID" ] && [ -n "$MAC_APP_PASSWORD" ] && [ -n "$MAC_TEAM_ID" ]; then
+              export APPLE_ID="$MAC_APPLE_ID" APPLE_APP_SPECIFIC_PASSWORD="$MAC_APP_PASSWORD" APPLE_TEAM_ID="$MAC_TEAM_ID"
+              signed=true
+            else
+              echo "::warning::CSC_LINK var ama notarize sırları eksik; Mac sürümü imzasız derleniyor."
+            fi
+          fi
+          if [ "$signed" = true ]; then
+            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+            npx electron-builder --mac --publish never -c.extraMetadata.macAutoUpdate=true
+            for app in dist/mac*/*.app; do
+              codesign --verify --deep --strict --verbose=2 "$app"
+              xcrun stapler validate "$app"
+            done
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            npx electron-builder --mac --publish never
+          fi
+          mkdir -p meta && echo "$signed" > meta/mac-signed
+      - if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-mac
+          path: meta/mac-signed
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}
@@ -66,6 +115,7 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
+            dist/*.zip
             dist/*.blockmap
             dist/latest*.yml
 
@@ -76,8 +126,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          pattern: dist-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: meta-mac
+          path: meta
       - env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
@@ -88,6 +143,11 @@ jobs:
           else
             : > notes.md
           fi
+          if [ "$(cat meta/mac-signed)" = true ]; then
+            MAC_NOTE="Uygulama Apple onaylı (imzalı). Uygulamalar klasörüne sürükle, ek adım gerekmez. Kuruluysa sonraki sürümler Windows'taki gibi açılıştaki \"Güncelle\" düğmesiyle gelir."
+          else
+            MAC_NOTE="Açılmazsa Terminal'de bir kez: \`xattr -cr \"/Applications/Mac Takip.app\"\`"
+          fi
           cat >> notes.md <<EOF
 
           ## Kurulum
@@ -95,7 +155,7 @@ jobs:
           **Windows:** \`MacTakip-Setup-${VERSION}.exe\` dosyasını indir ve çift tıkla. Tek tıkla kurulur, masaüstüne **Maç Takip** simgesi gelir. Uygulama kuruluysa açılışta "Güncelle" düğmesi çıkar, ayrıca indirmen gerekmez.
 
           **Mac (M1/M2/M3/M4):** \`MacTakip-${VERSION}-mac-arm64.dmg\`  ·  **Mac (Intel):** \`MacTakip-${VERSION}-mac-x64.dmg\`
-          Açılmazsa Terminal'de bir kez: \`xattr -cr "/Applications/Mac Takip.app"\`
+          ${MAC_NOTE}
           EOF
           gh release create "v${VERSION}" dist/* \
             --repo "$GITHUB_REPOSITORY" \

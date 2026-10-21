@@ -13,7 +13,7 @@ Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde g�
 | Mac (Intel) | `MacTakip-x.y.z-mac-x64.dmg` |
 
 - **Windows:** SmartScreen uyarı verirse: "Ek bilgi" → "Yine de çalıştır".
-- **Mac:** Uygulamayı Uygulamalar klasörüne sürükle. "Hasarlı" veya "açılamıyor" derse Terminal'de bir kez `xattr -cr "/Applications/Mac Takip.app"`.
+- **Mac:** Uygulamayı Uygulamalar klasörüne sürükle. İmzalı sürümlerde (yayın notunda "Apple onaylı" yazar) ek adım gerekmez. Eski, imzasız bir sürüm "hasarlı" veya "açılamıyor" derse Terminal'de bir kez `xattr -cr "/Applications/Mac Takip.app"`.
 
 ## Kaynak koddan çalıştırma
 
@@ -42,7 +42,7 @@ npm run dist:win   # dist/MacTakip-Setup-<sürüm>.exe
 npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 ```
 
-`.exe` Windows'ta veya Mac'te üretilebilir; `.dmg` sadece Mac'te. Uygulama imzasız olduğu için ilk açılışta yukarıdaki güvenlik uyarıları çıkar. Mac'te `.dmg` ile kurulan uygulama açılmazsa: Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç".
+`.exe` Windows'ta veya Mac'te üretilebilir; `.dmg` sadece Mac'te. Yerelde üretilen dosyalar imzasız olduğu için ilk açılışta yukarıdaki güvenlik uyarıları çıkar. Mac'te `.dmg` ile kurulan uygulama açılmazsa: Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç".
 
 ## Kullanım
 
@@ -92,7 +92,7 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - **Ses panosu** ayrı pencerede açılır (📌 ile her zaman üstte kalır): Spor, Eğlence ve kendi eklediğin sesler. ☆ ile favorilere ekle (en üstte görünür), sesleri sürükleyerek sırala, 🗑 ile kaldır (hazır sesler alttaki bağlantıyla geri gelir), ✎ ile adını değiştir. Panonun kendi ses seviyesi var; çalan butona tekrar basınca durur.
 
 **Güncelleme**
-- Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta "Güncelle" → "Yeniden başlat ve kur". Mac'te yeni sürümün indirme sayfası açılır.
+- Yeni sürüm çıkınca üst barda "Yeni sürüm" uyarısı görünür; güncellemek isteğe bağlıdır. Windows'ta ve imzalı Mac sürümlerinde "Güncelle" → "Yeniden başlat ve kur". İmzasız Mac sürümlerinde yeni sürümün indirme sayfası açılır.
 
 **SofaScore bağlantısı**
 - 403 uyarısı çıkarsa **SofaScore'u aç** düğmesine bas. Site açıldıktan sonra Maç Takip'e dönüp **Bağlantıyı kontrol et** düğmesine bir kez bas. Doğrulama istenirse sitede kendin tamamla.
@@ -101,6 +101,8 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 ## Yeni sürüm yayınlama
 
 `package.json` içindeki `version` alanını artırıp (ör. 1.1.0 → 1.2.0) `main`'e push et. GitHub Actions Windows ve Mac kurulum dosyalarını derleyip Releases'a yükler; kurulu uygulamalar açılışta yeni sürümü görür. Sürüm artırılmadan yapılan push'lar yeni sürüm oluşturmaz.
+
+Mac sürümü, depo sırlarında Developer ID sertifikası (`CSC_LINK`, `CSC_KEY_PASSWORD`) ve App Store Connect API anahtarı (`APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`) varsa imzalanır ve Apple'a onaylatılır (notarize). Bu sırlar yoksa imzasız derlenir.
 
 ## Teknik not
 
