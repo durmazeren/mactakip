@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createSofaClient } = require('../src/sofa-client');
+const { createSofaClient: createProductionClient } = require('../src/sofa-client');
+// State/cache tests use an immediate scheduler; production pacing is tested separately.
+const createSofaClient = (options) => createProductionClient({ ...options,
+  limits: { minIntervalMs: 0, maxPerMinute: 10_000, maxConcurrent: 2 } });
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), {
   status, headers: { 'content-type': 'application/json', ...headers },

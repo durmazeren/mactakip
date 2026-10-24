@@ -112,7 +112,9 @@ function removeMatch(id) {
   state.statsRaw.delete(id);
   players.delete(id);
   state.lastPoll.delete(id);
-  statsBustAt.delete(id);
+  state.lastAttempt.delete(id);
+  finalPolls.delete(id);
+  waitingSince.delete(id);
   delete state.layout.free[id];
   state.layout.z = state.layout.z.filter((x) => x !== id);
   if (state.layout.focus === id) state.layout.focus = null;
@@ -129,6 +131,9 @@ async function resetMatch(id) {
   state.stats.delete(id);
   state.statsRaw.delete(id);
   state.lastPoll.delete(id);
+  state.lastAttempt.delete(id);
+  finalPolls.delete(id);
+  waitingSince.delete(id);
   players.delete(id);
   forgetAlerts(id); // yeni veriyle sahte şut uyarısı çıkmasın
   for (const k of [...state.lastShown.keys()]) if (k.startsWith(`${id}|`)) state.lastShown.delete(k);
@@ -138,7 +143,6 @@ async function resetMatch(id) {
     tile.graph = null;
     tile.mode = null; // updateTile animasyonu baştan kurar
   }
-  statsBustAt.delete(id);
   const ok = await pollOne(id, true);
   renderShotList();
   buttons.forEach((b) => b.classList.remove('spinning'));
@@ -160,45 +164,50 @@ function refresh(animate) {
 
 /* ---------- Canlı güncelleme ---------- */
 
-// Gereksiz istek atmamak için: biten maç bir kez, başlamamış maç dakikada bir sorgulanır
+const finalPolls = new Set();
+const matchPolls = new Map();
+const waitingSince = new Map();
+
+function pollContext(id) {
+  const match = findMatch(id);
+  return { ...match, event: state.events.get(id), now: Date.now(),
+    focused: state.layout.focus === id || statsModalMatchId === id,
+    hasTargets: state.targets.some((t) => t.matchId === id),
+    liveCount: state.matches.filter((m) => !state.events.has(m.id) || isLive(state.events.get(m.id))).length };
+}
+
+function pollOptions(id) {
+  const rank = SofaPollPolicy.priority(pollContext(id));
+  return { priority: rank === 0 ? 'interactive' : rank <= 2 ? 'normal' : 'background' };
+}
+
 function needsPoll(id) {
-  if (findMatch(id)?.animationOnly) return Date.now() - (state.lastPoll.get(id) || 0) >= FALLBACK_RETRY_MS;
+  if (matchPolls.has(id)) return false;
   const ev = state.events.get(id);
-  const last = state.lastPoll.get(id) || 0;
-  if (!last) return true;
-  if (isOver(ev)) return false;
-  if (ev?.status?.type === 'notstarted' && ev.startTimestamp * 1000 - Date.now() > 2 * 60_000) {
-    return Date.now() - last >= IDLE_POLL_MS;
-  }
-  return true;
+  const last = state.lastAttempt.get(id) || 0;
+  if (!last) { if (!waitingSince.has(id)) waitingSince.set(id, Date.now()); return true; }
+  if (isOver(ev) && finalPolls.has(id)) return false;
+  const due = Date.now() - last >= SofaPollPolicy.interval(pollContext(id));
+  if (due && !waitingSince.has(id)) waitingSince.set(id, Date.now());
+  return due;
 }
 
-/* Sofascore maç başlamadan istenen istatistiğe 404 döner ve bu yanıt sunucu
- * önbelleğinde maç başladıktan sonra da kalabiliyor. Canlı maçta 404 gelirse aynı
- * istek önbelleği atlayan bir parametreyle tekrarlanır (maç başına dakikada en fazla bir). */
-const STATS_BUST_MS = 60_000;
-const statsBustAt = new Map();
+const pollRank = (id) => Math.max(0, SofaPollPolicy.priority(pollContext(id))
+  - Math.floor((Date.now() - (waitingSince.get(id) ?? Date.now())) / 30_000));
 
-async function freshStats(id, force = false) {
-  const last = statsBustAt.get(id) || 0;
-  if (!force && Date.now() - last < STATS_BUST_MS) return null;
-  statsBustAt.set(id, Date.now());
-  return api(`event/${id}/statistics?_=${Date.now()}`).catch(() => undefined);
+function pollOne(id, force = false, snapshot = null) {
+  if (matchPolls.has(id)) return matchPolls.get(id);
+  const work = fetchMatch(id, force, snapshot).finally(() => matchPolls.delete(id));
+  matchPolls.set(id, work);
+  return work;
 }
 
-async function pollOne(id, force = false) {
+async function fetchMatch(id, force, snapshot) {
+  state.lastAttempt.set(id, Date.now());
+  waitingSince.delete(id);
   const animationOnly = !!findMatch(id)?.animationOnly;
-  let [evRes, stRes] = await Promise.all([
-    api(`event/${id}`).catch(() => undefined),
-    animationOnly ? null : (force ? freshStats(id, true) : api(`event/${id}/statistics`).catch(() => undefined)),
-    !animationOnly && needsPlayers(id) ? loadPlayers(id) : null,
-  ]);
-  if (!findMatch(id)) return true;
-  const started = (evRes?.event || state.events.get(id))?.status?.type;
-  if (!animationOnly && !force && stRes === null && started && started !== 'notstarted') {
-    const fresh = await freshStats(id);
-    if (fresh) stRes = fresh;
-  }
+  const options = { ...pollOptions(id), fresh: force };
+  const evRes = snapshot ? { event: snapshot } : await api(`event/${id}`, options).catch(() => undefined);
   if (!findMatch(id)) return true;
   if (evRes?.event) {
     state.events.set(id, evRes.event);
@@ -210,15 +219,23 @@ async function pollOne(id, force = false) {
     }
     if (match?.animationOnly) { match.animationOnly = false; saveMatches(); }
   }
-  if (!animationOnly && stRes) {
+  const wantStats = !findMatch(id)?.animationOnly && !!state.events.get(id)
+    && state.events.get(id).status?.type !== 'notstarted' && evRes !== undefined;
+  const [stRes] = await Promise.all([
+    wantStats ? api(`event/${id}/statistics`, options).catch(() => undefined) : null,
+    wantStats && needsPlayers(id) ? loadPlayers(id) : null,
+  ]);
+  if (!findMatch(id)) return true;
+  if (wantStats && stRes) {
     state.statsRaw.set(id, stRes);
     state.stats.set(id, parseStats(stRes, matchSport(id)));
   }
-  else if (!animationOnly && stRes === null && state.events.get(id)?.status?.type !== 'notstarted') {
+  else if (wantStats && stRes === null) {
     state.statsRaw.delete(id);
     state.stats.set(id, { none: true }); // maç başladı ama Sofascore istatistik tutmuyor
   }
   if (animationOnly || evRes !== undefined) state.lastPoll.set(id, Date.now());
+  if (isOver(state.events.get(id)) && evRes !== undefined && stRes !== undefined) finalPolls.add(id);
   updateTile(id);
   checkAlerts(id);
   renderStatsModalIfOpen(id);
@@ -228,15 +245,31 @@ async function pollOne(id, force = false) {
 let polling = false;
 async function pollAll() {
   if (polling) return;
-  const ids = state.matches.map((m) => m.id).filter(needsPoll);
+  const connection = state.sofaConnection;
+  if (connection?.state === 'blocked' && (connection.status === 403 || connection.retryAt > Date.now())) return;
+  const due = state.matches.map((m) => m.id).filter(needsPoll).sort((a, b) =>
+    pollRank(a) - pollRank(b)
+      || (state.lastAttempt.get(a) || 0) - (state.lastAttempt.get(b) || 0));
+  // Small rounds prevent bulk selection/startup from filling the request queue.
+  const ids = due.slice(0, 6);
   if (!ids.length) return;
   polling = true;
   try {
-    const ok = await mapLimit(ids, 4, pollOne);
+    const snapshots = new Map();
+    if (state.matches.length >= 8) {
+      // One live-score response covers many matches. Missing entries still get
+      // their own event request, so finished/missing matches are not inferred.
+      const sports = new Set(ids.filter((id) => !state.events.has(id) || isLive(state.events.get(id))).map(matchSport));
+      for (const sport of sports) {
+        const list = await api(`sport/${sport}/events/live`, { priority: 'normal' }).catch(() => null);
+        for (const ev of list?.events || []) if (findMatch(ev.id)) snapshots.set(ev.id, ev);
+      }
+    }
+    const ok = await mapLimit(ids, 1, (id) => findMatch(id) ? pollOne(id, false, snapshots.get(id)) : true);
     renderShotList();
     const failed = ok.filter((x) => !x).length;
     setStatus(failed ? `Bağlantı sorunu (${failed} maç güncellenemedi)`
-      : `Güncellendi ${new Date().toLocaleTimeString('tr-TR')}`);
+      : `Güncellendi ${new Date().toLocaleTimeString('tr-TR')}${due.length > ids.length ? ' · diğer maçlar sırayla' : ''}`);
   } finally {
     polling = false;
   }
@@ -361,10 +394,19 @@ function initConnection() {
     const wait = Math.max(0, Math.ceil((connection.retryAt - Date.now()) / 60_000));
     text.textContent = connection.status === 429
       ? `SofaScore istek sınırı. Otomatik istekler ${wait || 1} dakika bekliyor.`
-      : 'SofaScore erişimi reddetti (403). Otomatik istekler durduruldu; siteyi açıp bağlantıyı kontrol edebilirsin.';
-    retry.disabled = checking || (connection.status === 429 && connection.retryAt > Date.now());
+      : ['opening', 'checking'].includes(connection.recovery?.phase)
+        ? 'SofaScore oturumu yenileniyor. Bağlantı bir kez kontrol edilecek…'
+        : 'SofaScore erişimi reddetti (403). Oturum yenilemesi durdu; siteyi açıp bağlantıyı kontrol edebilirsin.';
+    retry.disabled = checking || ['opening', 'checking'].includes(connection.recovery?.phase)
+      || (connection.status === 429 && connection.retryAt > Date.now());
   };
-  const update = (value) => { connection = value; state.sofaConnection = value; render(); };
+  const update = (value) => {
+    const recovered = connection.state === 'blocked' && value.state === 'connected';
+    connection = value; state.sofaConnection = value; render();
+    if (recovered) {
+      state.lastAttempt.clear(); waitingSince.clear(); state.catalog.loadedAt = 0;
+    }
+  };
   window.sofa.onConnection(update);
   window.sofa.connection().then(update);
   setInterval(render, 1000);
@@ -380,6 +422,8 @@ function initConnection() {
       if (result.state === 'connected' && !result.error) {
         state.catalog.loadedAt = 0;
         state.lastPoll.clear();
+        state.lastAttempt.clear();
+        waitingSince.clear();
         const pickerOpen = !$('#dropdown').hidden;
         await Promise.all([pollAll(), pickerOpen ? loadCatalog(true) : null,
           pickerOpen ? loadLeagueMatches(selectedLeagueId(), true) : null]);
@@ -397,6 +441,7 @@ function initConnection() {
 }
 
 function init() {
+  syncWatched();
   initTheme();
   initSoundSettings();
   initMasterSpeaker();

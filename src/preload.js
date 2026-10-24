@@ -1,12 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('sofa', {
-  get: async (apiPath) => {
-    const result = await ipcRenderer.invoke('sofa:get', apiPath);
+  get: async (apiPath, options) => {
+    const result = await ipcRenderer.invoke('sofa:get', apiPath, options);
     if (!result.ok) throw Object.assign(new Error(result.error.message), result.error);
     return result.data;
   },
   connection: () => ipcRenderer.invoke('sofa:state'),
+  watch: (ids) => ipcRenderer.invoke('sofa:watch', ids),
   retry: () => ipcRenderer.invoke('sofa:retry'),
   open: () => ipcRenderer.invoke('sofa:open'),
   onConnection: (cb) => {
@@ -14,6 +15,10 @@ contextBridge.exposeInMainWorld('sofa', {
     ipcRenderer.on('sofa:status', listener);
     return () => ipcRenderer.removeListener('sofa:status', listener);
   },
+});
+
+contextBridge.exposeInMainWorld('boxScore', {
+  players: (query) => ipcRenderer.invoke('box:players', query),
 });
 
 contextBridge.exposeInMainWorld('appShortcut', {

@@ -10,6 +10,7 @@ const source = (file) => fs.readFileSync(path.join(__dirname, '..', 'src', 'js',
 function context() {
   const ctx = vm.createContext({ localStorage: { getItem: () => null }, window: {}, document: {} });
   vm.runInContext(source('core.js'), ctx);
+  vm.runInContext(source('players.js'), ctx); // oyuncu market listeleri hedef etiketlerinde kullanılır
   vm.runInContext(source('coupon.js'), ctx);
   return ctx;
 }

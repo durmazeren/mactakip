@@ -490,20 +490,30 @@ body.side-hidden .side { display: none; }
   .tile .goal-overlay.show .goal-overlay-content { animation: none; opacity: 1; transform: none; filter: none; }
 }
 @keyframes goal-cover-reduced { 0%, 100% { opacity: 0; } 8%, 78% { opacity: 1; } }
-.sc-top { display: flex; align-items: center; gap: 2px; margin-bottom: 3px; }
+.sc-top { display: flex; align-items: center; gap: 2px; margin-bottom: 3px; min-height: 22px; }
+.sc-head { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
 .sc-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 5px; font-weight: 700; white-space: nowrap; overflow: hidden; }
 .sc-title span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sc-title .home { color: var(--home); }
 .sc-title .away { color: var(--away); }
 .sc-score { flex: none; font-variant-numeric: tabular-nums; }
+.sc-league { display: none; color: var(--text-2); font-size: 12px; font-weight: 600; }
 .sc-meta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; margin: 0 4px; }
 .sc-meta.live { color: var(--live); font-weight: 700; }
 .sc-meta.live::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 2px; }
-.sc-target-btn {
-  flex: none; background: var(--primary-hl); color: var(--primary); border: 0;
-  border-radius: 6px; padding: 2px 7px; font-size: 12px; font-weight: 700; margin-right: 2px;
+/* Düğmeler yalnız kartın üstüne gelince: adların üstünde hafif bulanık katman (klavye odağında da) */
+.sc-actions {
+  position: absolute; inset: -3px -4px; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 4px;
+  border-radius: 7px; background: color-mix(in srgb, var(--sp) 55%, transparent);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity .12s;
 }
-.sc-target-btn:hover, .sc-target-btn.on { background: var(--primary); color: #171c1f; }
+.shot-card:hover .sc-actions, .sc-actions:focus-within { opacity: 1; }
+.shot-card:hover .sc-actions button, .sc-actions:focus-within button { pointer-events: auto; }
+.shot-card .sc-actions .icon-btn { padding: 3px 7px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--s1) 70%, transparent); }
+.shot-card .sc-actions .icon-btn:hover { color: var(--text); background: var(--line); }
+.shot-card .sc-actions .sc-target-btn { color: var(--primary); font-size: 16px; font-weight: 800; padding: 1px 8px 2px; }
+.shot-card .sc-actions .sc-target-btn:hover, .shot-card .sc-actions .sc-target-btn.on { background: var(--primary); color: #171c1f; }
 .shot-card .icon-btn { padding: 2px 5px; font-size: 12px; }
 
 /* Tek satırlık karşılaştırma: 19 ▬▬ Şut ▬▬ 16 */
@@ -855,8 +865,6 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .tile-menu button:hover { background: var(--sp); color: var(--text); }
 .tile-menu button[hidden] { display: none !important; }
 /* Şut ekranı kartı: ses / yenile / animasyon düğmeleri yalnız üstüne gelince (klavye odağında da) */
-.shot-card .sc-hover { opacity: 0; transition: opacity .12s; }
-.shot-card:hover .sc-hover, .shot-card:focus-within .sc-hover, .sc-hover.on { opacity: 1; }
 /* Gol yazısı dar kartta sığsın: kart genişliğine göre küçülür */
 .shot-card .goal-overlay { container-type: inline-size; }
 .shot-card .goal-overlay-word { font-size: clamp(15px, 7.5cqw, 27px); overflow: hidden; }
@@ -911,3 +919,30 @@ body.fs .topbar, body.fs .side { display: none !important; }
 .sb-acts .sb-fav { background: var(--sp); color: var(--muted); font-size: 14px; }
 .sb-acts .sb-fav + .sb-act { background: #24b8d8; }
 .sb-acts .sb-act:last-child { background: #ef5350; }
+
+/* ---------- Basketbol kartı: logolar ve skor büyük, takım istatistikleri yok ---------- */
+.shot-card { container-type: inline-size; }
+.sc-board { display: none; }
+.shot-card.basket .sc-board {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center;
+  column-gap: 6px; row-gap: 4px; padding: 6px 0 6px; cursor: pointer;
+}
+.shot-card.basket .sc-title .home, .shot-card.basket .sc-title .away,
+.shot-card.basket .sc-title .sc-score, .shot-card.basket .sc-meta { display: none; }
+.shot-card.basket .sc-league { display: inline; }
+.scb-team { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+.scb-logo { width: clamp(36px, 18cqw, 72px); height: clamp(36px, 18cqw, 72px); object-fit: contain; }
+.scb-name {
+  max-width: 100%; font-weight: 700; line-height: 1.2; text-align: center; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.scb-team.home .scb-name { color: var(--home); }
+.scb-team.away .scb-name { color: var(--away); }
+.scb-mid { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 64px; }
+.scb-score { font-size: clamp(22px, 9cqw, 46px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scb-clock { font-size: 14px; font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scb-clock.live { color: var(--live); }
+.scb-quarters { grid-column: 1 / -1; text-align: center; font-size: 11px; color: var(--muted); white-space: pre; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.shot-card.collapsed .scb-quarters { display: none; }
+.shot-card.collapsed.basket .scb-logo { width: 28px; height: 28px; }
+.shot-card.collapsed.basket .scb-score { font-size: 24px; }

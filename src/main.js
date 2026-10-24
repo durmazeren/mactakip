@@ -1,6 +1,12 @@
 const { app, BrowserWindow, ipcMain, net, shell, session, Notification } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { createSofaClient, SOFA_PARTITION } = require('./sofa-client');
+const { createSessionRecovery } = require('./sofa-recovery');
+const { createSofaDiagnostics } = require('./sofa-diagnostics');
+const { openRecoverySite } = require('./sofa-site-visit');
+const { createSofaPageReadiness } = require('./sofa-page-readiness');
+const { createBoxSources } = require('./box-sources');
 
 const REPO = 'durmazeren/mactakip';
 const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
@@ -8,6 +14,18 @@ const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
 let win = null;
 let sofaClient = null;
 let sofaWindow = null;
+let watchedIds = [];
+let sofaLoad = null;
+let sofaRecovery = null;
+let sofaDiagnostics = null;
+const sofaState = () => ({ ...sofaClient.getState(), recovery: sofaRecovery?.snapshot() });
+const sendSofaState = () => { if (win && !win.isDestroyed()) win.webContents.send('sofa:status', sofaState()); };
+
+// Local integrations share the same request queue and provider block state.
+// The client remains in the main process; it is never exposed to remote pages.
+module.exports.getSofaClient = () => sofaClient;
+module.exports.getWatchedIds = () => [...watchedIds];
+module.exports.getSofaRecovery = () => sofaRecovery?.snapshot() || null;
 let soundBoardWin = null;
 
 // Geliştirme/test için ayrı veri klasörü (açık olan asıl uygulamanın listesine dokunmamak için)
@@ -60,24 +78,40 @@ function createWindow() {
   });
 }
 
-// Veri, animasyon ve kullanıcının açtığı SofaScore sayfası aynı oturumu kullanır.
-ipcMain.handle('sofa:get', async (_e, apiPath) => {
-  try { return { ok: true, data: await sofaClient.get(apiPath) }; }
+// Veri ve bağlantı kontrol sayfası aynı oturumda; animasyonlar ayrı çerez deposunda.
+ipcMain.handle('sofa:get', async (_e, apiPath, options) => {
+  try { return { ok: true, data: await sofaClient.get(apiPath, options) }; }
   catch (err) { return { ok: false, error: { message: err.message, code: err.code,
     status: err.status, retryAt: err.retryAt } }; }
 });
-ipcMain.handle('sofa:state', () => sofaClient.getState());
+// Basketbol oyuncu istatistiği yedek kaynakları (Sofascore oyuncu verisi gecikince)
+const boxSources = createBoxSources({ fetchJson: async (url, headers) => {
+  const res = await net.fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+  return res.json();
+} });
+ipcMain.handle('box:players', (_e, query) => boxSources.players(query).catch(() => null));
+ipcMain.handle('sofa:state', sofaState);
+ipcMain.handle('sofa:watch', (_e, ids) => {
+  watchedIds = Array.isArray(ids) ? [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 30) : [];
+});
 ipcMain.handle('sofa:retry', () => sofaClient.retry());
-ipcMain.handle('sofa:open', () => {
-  if (sofaWindow && !sofaWindow.isDestroyed()) { sofaWindow.show(); sofaWindow.focus(); return; }
+function openSofaWindow() {
+  if (sofaWindow && !sofaWindow.isDestroyed()) {
+    sofaWindow.show(); sofaWindow.focus();
+    return { window: sofaWindow, created: false, loaded: sofaLoad };
+  }
   sofaWindow = new BrowserWindow({
     width: 1100, height: 800, title: 'SofaScore · Bağlantı kontrolü',
     webPreferences: { partition: SOFA_PARTITION, nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
   sofaWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  sofaWindow.on('closed', () => { sofaWindow = null; });
-  sofaWindow.loadURL('https://www.sofascore.com/').catch(() => {});
-});
+  sofaWindow.on('closed', () => { sofaWindow = null; sofaLoad = null; });
+  sofaLoad = sofaWindow.loadURL('https://www.sofascore.com/');
+  sofaLoad.catch(() => {});
+  return { window: sofaWindow, created: true, loaded: sofaLoad };
+}
+ipcMain.handle('sofa:open', () => { openSofaWindow(); });
 
 // Ses panosu: ayrı, küçük pencere. Maç izlerken yanda açık kalır; kapatmak ana uygulamayı kapatmaz.
 ipcMain.handle('soundboard:open', () => {
@@ -207,9 +241,44 @@ app.whenReady().then(() => {
   if (!primaryInstance) return;
   if (process.platform === 'win32') app.setAppUserModelId('com.mactakip.app'); // Windows bildirimleri için
   const sofaSession = session.fromPartition(SOFA_PARTITION);
+  const pageReadiness = createSofaPageReadiness(sofaSession);
+  // Restarting the app must not reset a provider's pause. No cookies or tokens
+  // are stored here, only the last connection status and Retry-After deadline.
+  const stateFile = path.join(app.getPath('userData'), 'sofa-connection.json');
+  const recoveryFile = path.join(app.getPath('userData'), 'sofa-recovery.json');
+  sofaDiagnostics = createSofaDiagnostics(path.join(app.getPath('userData'), 'sofa-diagnostics.jsonl'));
+  let initialState;
+  try { initialState = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { /* First launch. */ }
   sofaClient = createSofaClient({ fetch: (url, options) => sofaSession.fetch(url, options),
-    onState: (state) => { if (win && !win.isDestroyed()) win.webContents.send('sofa:status', state); } });
+    initialState, onDiagnostic: sofaDiagnostics.record, onState: (state) => {
+      try {
+        fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state), { mode: 0o600 });
+        fs.renameSync(stateFile + '.tmp', stateFile);
+      } catch { /* A storage failure must not affect the provider pause. */ }
+      sendSofaState();
+      queueMicrotask(() => sofaRecovery?.observe(state));
+    } });
+  let recoveryState;
+  try { recoveryState = JSON.parse(fs.readFileSync(recoveryFile, 'utf8')); } catch { /* First launch. */ }
+  sofaRecovery = createSessionRecovery({ initial: recoveryState,
+    getState: () => sofaClient.getState(), probe: () => sofaClient.retry(),
+    openSite: () => openRecoverySite({ openWindow: openSofaWindow, record: sofaDiagnostics.record,
+      watchPage: pageReadiness.watch,
+      focusApp: () => { if (win && !win.isDestroyed()) win.focus(); } }),
+    persist: (state) => {
+      fs.writeFileSync(recoveryFile + '.tmp', JSON.stringify(state), { mode: 0o600 });
+      fs.renameSync(recoveryFile + '.tmp', recoveryFile);
+    }, onEvent: (state) => {
+      sofaDiagnostics.record({ type: 'recovery', at: new Date().toISOString(), ...state });
+      sendSofaState();
+    } });
   createWindow();
+  sofaDiagnostics.record({ type: 'profiles', at: new Date().toISOString(), profiles: {
+    dataPartition: SOFA_PARTITION, trackerPartition: 'persist:sofa',
+    dataElectron: /\sElectron\//.test(sofaSession.getUserAgent()),
+    trackerElectron: /\sElectron\//.test(win.webContents.getUserAgent().replace(/\sElectron\/[\d.]+/g, '')),
+  } });
+  win.webContents.once('did-finish-load', () => sofaRecovery.observe(sofaClient.getState()));
   setupUpdater();
   win.webContents.once('did-finish-load', () => setTimeout(checkForUpdates, 5000));
   setInterval(checkForUpdates, UPDATE_CHECK_MS);

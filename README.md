@@ -1,6 +1,6 @@
 # Maç Takip
 
-Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde gösterir. Sağdaki "Şut ekranı" sadece seçili maçların toplam ve isabetli şutlarını yazar (her 10 sn'de güncellenir). Mac ve Windows'ta aynı şekilde çalışır.
+Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde gösterir. Sağdaki "Şut ekranı" seçili maçların istatistiklerini gösterir; odaktaki maçlar daha sık, arka plandaki maçlar sırayla güncellenir. Mac ve Windows'ta aynı şekilde çalışır.
 
 ## İndir (önerilen)
 
@@ -69,15 +69,19 @@ npm run dist:mac   # dist/MacTakip-<sürüm>-mac-arm64.dmg ve -mac-x64.dmg
 - ⚙ ile kartta hangi istatistiklerin görüneceği seçilir (ör. korneri kapat) ve sıralama ayarlanır:
   - **Elle:** kartın üstünde basılı tut ve sürükle. Sıra animasyon ızgarasına da yansır (Otomatik moddayken sürüklersen Elle'ye geçer).
   - **Otomatik:** hedefli canlı maçlar üstte, sonra canlı, başlamamış ve en altta küçülmüş halde biten maçlar.
+- Basketbol kartında takım logoları, skor, çeyrek ve süre büyük görünür; takım istatistikleri kartta gösterilmez.
 - Şut, isabetli şut, korner veya gol olunca maçın kutusunda ve kartında renkli bir uyarı belirir.
 - Gol olunca şut kartı birkaç saniyeliğine tam boy bir gol animasyonuna dönüşür; ardından istatistik ve hedefler kaldığı yerden görünür.
 - Kartın üstüne gelince ses, ↻ ve ▷ / ▶ düğmeleri görünür: ▷ / ▶ maçın animasyonunu açar/kapatır; ↻ veri gelmiyor ya da animasyon takıldıysa o maçı baştan yükler.
 - Sofascore değeri 0 olan satırları göndermediği için eksik şut / isabetli şut, diğer şut satırlarından hesaplanır.
 
 **Kupon takibi**
-- Kartın başlığındaki **+ Hedef** → **Takım** ya da **Oyuncu**.
+- Kartın üstüne gelince takım adlarının üstünde düğmeler çıkar: **+** (hedef ekle), ses, ↻, ▷ ve ✕. **+** → **Takım** ya da **Oyuncu**.
   - Takım: maç, taraf (ev / deplasman / toplam), istatistik (şut / isabetli şut / korner), periyot, üst/alt ve barem. Kartın altında ince çubuk olarak görünür.
-  - Oyuncu: maçın kadrosundan oyuncu (ilk 11 / yedekler), şut veya isabetli şut, üst/alt ve barem (maç sonu). Tüm oyuncu hedefleri şut ekranının en altında "Oyuncu hedefleri" bölümünde listelenir; oyuncunun durumu (sahada, yedek, oyundan çıktı) yazar. Oyuncu oyundan çıkarsa veya kırmızı kart görürse hedefi o an sonuçlanır.
+  - Oyuncu: maçın kadrosundan oyuncu (ilk 11 / yedekler), istatistik, üst/alt ve barem (maç sonu).
+    - Futbol: toplam / isabetli / isabetsiz / bloklanan şut, gol, asist, pas, kilit pas, orta, başarılı çalım, ofsayt, müdahale, top kapma, top kazanma, uzaklaştırma, kurtarış, faul, kazanılan faul, kart.
+    - Basketbol: sayı, ribaund, asist, üçlük; sayı+ribaund+asist, sayı+ribaund, sayı+asist, ribaund+asist, top çalma+blok; saha içi / 2'lik / 3'lük / serbest atış deneme ve isabet; hücum / savunma ribaundu, top çalma, blok, top kaybı, faul.
+    - Sofascore basketbolda oyuncu istatistiğini geç girdiği için NBA, WNBA, EuroLeague ve EuroCup maçlarında resmî canlı istatistik de (NBA, EuroLeague, yedek olarak ESPN) okunur; her istatistikte önde olan değer kullanılır, resmî kaynak bir değeri düzeltirse ona uyulur. Tüm oyuncu hedefleri şut ekranının en altında "Oyuncu hedefleri" bölümünde listelenir; oyuncunun durumu (sahada, yedek, oyundan çıktı) yazar. Oyuncu oyundan çıkarsa veya kırmızı kart görürse hedefi o an sonuçlanır.
 - Üst hedef baremi geçince yeşile döner ("Tuttu"), sayaç artmaya devam eder. Alt hedef baremi aşınca kırmızıya döner. Periyot bitince tutmayanlar "Yattı" olur.
 - Şut ekranının üstünde kuponun özeti: kaç hedef tuttu, yattı, devam ediyor.
 
@@ -106,6 +110,13 @@ Animasyon yükleme hatalarında en fazla üç deneme yapılır: 15, 45 ve 120 sa
 
 Electron uygulaması (`src/`). Veri Sofascore'un resmi olmayan uç noktalarından gelir (`/api/v1/event/{id}`, `/statistics`, `/live-match-tracker`); istekler Electron'un ağ katmanından yapılır, normal sunucu istekleri Sofascore tarafından engelleniyor. Sofascore bu uç noktaları değiştirirse güncelleme gerekebilir.
 
-Veri ve animasyon `persist:sofa` oturumunu paylaşır. Yinelenen istekler birleştirilir; aynı anda en fazla iki veri isteği gönderilir. Lig ayarları ve fikstür kısa süre önbellekte tutulur. 403 yanıtından sonra otomatik veri istekleri kullanıcı bağlantıyı kontrol edene kadar durur; 429 yanıtında sunucunun `Retry-After` süresine uyulur. Ağ değiştirildikten sonra uyarıdaki **Bağlantıyı kontrol et** düğmesi tek istekle erişimi sınar. **SofaScore'u aç**, aynı uygulama oturumunda siteyi açar; doğrulama istenirse kullanıcı tamamlar. Bu davranış IP engelini kaldırmayı garanti etmez.
+Veri ve bağlantı kontrol sayfası `persist:sofa-data` oturumunu paylaşır; animasyonlar mevcut `persist:sofa` oturumunda kalır. Farklı tarayıcı uyumluluk ayarlarının çerez depoları ayrıdır. Uygulamanın JSON istekleri tek kuyruktan geçer: aynı anda bir istek, başlangıçlar arasında en az 1,25 saniye ve kayan 60 saniyede en fazla 36 istek. Bunlar bizim ihtiyatlı bütçemizdir; Sofascore'un açıkladığı veya erişim garantisi veren limitler değildir. Yinelenen istekler birleştirilir; aynı maçın eşzamanlı yenilemeleri tek işe dönüşür. Lig ayarları, fikstür, kadro ve oranlar uygun süreyle önbellekte tutulur. Çok maçta skor için toplu canlı liste kullanılır; her turda en fazla altı maçın ayrıntısı sırayla yenilenir. Odak 10, animasyonlu maç 20, hedefli maç 30 saniye; arka plan en az 60 saniye bekler ve maç sayısıyla yavaşlar. Bunlar asgari aralıklardır; dolu kuyrukta daha uzun sürebilir. Başlamasına 15 dakikadan çok kalan maçta yalnız maç durumu beş dakikada bir kontrol edilir, istatistik istenmez.
+
+403 yanıtı bekleyen kuyruğu iptal eder ve otomatik veri isteklerini durdurur; 429 yanıtında sunucunun `Retry-After` süresine uyulur. Bekleme uygulama veri klasörüne kaydedilir; yeniden açılış bunu sıfırlamaz. Ağ değiştirildikten sonra uyarıdaki **Bağlantıyı kontrol et** düğmesi aynı hız bütçesi içinde tek istekle erişimi sınar. **SofaScore'u aç**, aynı uygulama oturumunda siteyi açar; doğrulama istenirse kullanıcı tamamlar. Bu davranış IP engelini kaldırmayı garanti etmez. Animasyon sağlayıcısının kendi iç istekleri bu JSON bütçesine dahil değildir.
 
 Maç seçici genel liste için yalnızca canlı maçlar ve günün toplu fikstürünü ister; ayrı ayrı 40 lig sorgulanmaz. Fikstür beş dakika önbellekte tutulur. Belirli ligin önümüzdeki üç günlük fikstürü ancak kullanıcı ligi seçtiğinde istenir. Maç istatistik paneli yeni istatistik isteği veya ikinci bir animasyon bağlantısı açmaz; mevcut animasyon büyütülür. Yalnız şut ekranındaki maç için panel açıkken tek bir geçici animasyon açılır.
+
+
+403 sonrasında aynı oturumda görünür SofaScore sayfasını açıp bir kez bağlantı kontrolü yapan otomatik yenileme vardır. Sayfa açıldıktan sonra normal oturum hazırlığı için on saniye beklenir; sayfanın kendi taze, başarılı futbol JSON yanıtı da tanı amacıyla gözlenir. İnsan doğrulaması, site reddi, sayfa hatası veya tekrar 403 durumunda işlem durur. Başarısız deneme kendini yinelemez; başarılı bağlantıdan sonraki yeni olayda da otomatik denemeler arasında en az iki dakika vardır. Bekleme yeniden açılışta korunur. Kullanıcının açık olan veya etkileştiği pencere otomatik kapatılmaz.
+
+`sofa-diagnostics.jsonl` uygulama veri klasöründe tutulur. Son 403'ün yolu, yanıt türü, `challenge` nedeni, istek sayısı ve otomatik yenileme aşamaları kaydedilir; cookie/token değerleri, istek başlıkları ve API gövdeleri kaydedilmez. Kayıt boyutu sınırlıdır. HTTP 403 tek başına IP engeli veya istek limiti kanıtı değildir.

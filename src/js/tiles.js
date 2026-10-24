@@ -113,6 +113,8 @@ function setStage(tile, mode) {
   // Atak grafiği boyutunu pencere genişliğinden hesapladığı için sayfa yakınlaştırması
   // kullanır; yakınlaştırma oturum başına ortak olduğundan her grafiğe ayrı oturum.
   wv.setAttribute('partition', mode === 'tracker' ? PARTITION : `momentum-${tile.id}`);
+  // Tracker-only browser compatibility; retain the actual Chromium/OS version.
+  if (mode === 'tracker') wv.setAttribute('useragent', navigator.userAgent.replace(/\sElectron\/[\d.]+/g, ''));
   wv.setAttribute('src', mode === 'tracker' ? TRACKER_URL(tile.id) : MOMENTUM_URL(tile.id));
   wv.addEventListener('dom-ready', () => {
     if (tile.webview !== wv) return;

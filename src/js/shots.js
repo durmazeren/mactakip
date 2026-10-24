@@ -24,20 +24,61 @@ function cmpRow(label) {
   return { root, h, a, hb, ab, hi, ai };
 }
 
+/* Takım adları dar kartta kısaltılmadan sığsın: önce yazı küçülür, yine sığmazsa
+ * takımın kısa kodu (ör. FEN) yazılır. Ad, skor veya kart genişliği değişince yeniden ölçülür. */
+const NAME_SIZES = { title: [14, 13, 12, 11], board: [15, 14, 13, 12, 11] };
+
+function fitNames(box, nodes, names, sizes) {
+  if (!box.isConnected || !box.clientWidth) return;
+  // Basketbol panelinde ad iki satıra kırılabilir: yükseklik taşması da sayılır
+  const overflow = () => nodes.some((n) => n.scrollWidth > n.clientWidth + 0.5 || n.scrollHeight > n.clientHeight + 1);
+  for (const pick of ['short', 'code']) {
+    nodes.forEach((n, i) => { n.textContent = names[i][pick]; });
+    for (const size of sizes) {
+      box.style.fontSize = `${size}px`;
+      if (!overflow()) return;
+    }
+  }
+}
+
+const nameForms = (team) => ({ short: teamName(team), code: team?.nameCode || teamName(team) });
+
+function fitCardNames(c) {
+  if (!c.names) return;
+  if (c.sport === 'basketball') fitNames(c.board, [c.bHomeN, c.bAwayN], c.names, NAME_SIZES.board);
+  else fitNames(c.title, [c.homeN, c.awayN], c.names, NAME_SIZES.title);
+}
+
+const cardResize = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const c = [...shotCards.values()].find((x) => x.el === entry.target);
+    if (c && Math.abs(entry.contentRect.width - (c.fitWidth || 0)) > 1) {
+      c.fitWidth = entry.contentRect.width;
+      fitCardNames(c);
+    }
+  }
+}) : null;
+
 function ensureCard(id) {
   if (shotCards.has(id)) return shotCards.get(id);
   const card = el('div', 'shot-card');
   const top = el('div', 'sc-top');
+  const head = el('div', 'sc-head');
   const title = el('div', 'sc-title');
   title.tabIndex = 0;
   title.setAttribute('role', 'button');
   const homeN = el('span', 'home');
   const score = el('b', 'sc-score');
   const awayN = el('span', 'away');
-  title.append(homeN, score, awayN);
+  const league = el('span', 'sc-league');
+  title.append(homeN, score, awayN, league);
   const meta = el('div', 'sc-meta');
-  const targetBtn = el('button', 'sc-target-btn', '+ Hedef');
+  // Kartta normalde yalnız adlar ve skor; düğmeler fareyle üstüne gelince adların üstünde
+  // bulanık bir katmanda çıkar (klavyeyle odaklanınca da)
+  const actions = el('div', 'sc-actions');
+  const targetBtn = el('button', 'icon-btn sc-target-btn', '+');
   targetBtn.title = 'Kupon hedefi ekle';
+  targetBtn.setAttribute('aria-label', 'Kupon hedefi ekle');
   targetBtn.addEventListener('click', () => {
     if (openForm?.matchId === id) closeTargetForm(); else openTargetForm(id);
   });
@@ -49,10 +90,28 @@ function ensureCard(id) {
   const resetBtn = el('button', 'icon-btn reset-btn', '↻');
   resetBtn.title = 'Bu maçı yenile (veriyi ve animasyonu baştan yükle)';
   resetBtn.addEventListener('click', () => resetMatch(id));
-  // Az kullanılan düğmeler (ses, yenile, animasyon) yalnız kartın üstüne gelince görünür
-  const spk = speakerButton(id);
-  for (const b of [spk, resetBtn, animBtn]) b.classList.add('sc-hover');
-  top.append(title, meta, targetBtn, spk, resetBtn, animBtn, rm);
+  actions.append(targetBtn, speakerButton(id), resetBtn, animBtn, rm);
+  head.append(title, actions);
+  top.append(head, meta);
+  // Basketbol: logolar ve skor kartın büyük kısmını kaplar; takım istatistikleri kartta gösterilmez
+  const board = el('div', 'sc-board');
+  const side = (cls) => {
+    const team = el('div', `scb-team ${cls}`);
+    const logo = el('img', 'scb-logo');
+    logo.alt = '';
+    logo.addEventListener('error', () => { logo.hidden = true; });
+    const name = el('span', 'scb-name');
+    team.append(logo, name);
+    return { team, logo, name };
+  };
+  const bHome = side('home');
+  const bAway = side('away');
+  const bMid = el('div', 'scb-mid');
+  const bScore = el('b', 'scb-score');
+  const bClock = el('span', 'scb-clock');
+  const bQuarters = el('span', 'scb-quarters');
+  bMid.append(bScore, bClock);
+  board.append(bHome.team, bMid, bAway.team, bQuarters);
   const statsBox = el('div', 'sc-stats');
   const none = el('div', 'sc-none', 'Sofascore bu maç için istatistik tutmuyor');
   const targets = el('div', 'targets');
@@ -68,7 +127,7 @@ function ensureCard(id) {
   goalContent.append(goalWord, el('span', 'goal-overlay-team'), goalScore);
   goalOverlay.append(goalContent);
 
-  card.append(top, statsBox, none, targets, formHost, el('div', 'alert-badge'), goalOverlay);
+  card.append(top, board, statsBox, none, targets, formHost, el('div', 'alert-badge'), goalOverlay);
   let lastPointerUp = 0;
   card.addEventListener('pointerdown', (event) => {
     if (event.target.closest('button, input, select, textarea, a, label, .targets, .sc-form-host, .goal-overlay')) return;
@@ -87,8 +146,11 @@ function ensureCard(id) {
     openStatsModal(id);
   });
   $('#shotList').append(card);
-  const ref = { el: card, title, homeN, score, awayN, meta, targetBtn, animBtn, statsBox, rows: {}, sport: null, none, targets, formHost };
+  const ref = { el: card, title, homeN, score, awayN, league, meta, targetBtn, animBtn, statsBox, rows: {}, sport: null, none,
+    targets, formHost, board, bHomeN: bHome.name, bAwayN: bAway.name, bHomeLogo: bHome.logo, bAwayLogo: bAway.logo,
+    bScore, bClock, bQuarters, names: null, fitKey: '' };
   shotCards.set(id, ref);
+  cardResize?.observe(card);
   return ref;
 }
 
@@ -140,6 +202,13 @@ function updateCard(id) {
   c.animBtn.textContent = m.anim ? '▶' : '▷';
   c.animBtn.classList.toggle('on', m.anim);
   c.animBtn.title = m.anim ? 'Animasyonu kapat (sadece şut ekranında kalsın)' : 'Animasyonu aç';
+  if (!ev || ev._animationOnly) {
+    c.names = null;
+    c.fitKey = '';
+    c.title.style.fontSize = '';
+    c.el.classList.remove('basket');
+    c.league.textContent = '';
+  }
   if (!ev) {
     c.el.classList.remove('live');
     c.meta.classList.remove('live');
@@ -171,8 +240,6 @@ function updateCard(id) {
     return;
   }
   c.none.textContent = 'Sofascore bu maç için istatistik tutmuyor';
-  c.homeN.textContent = teamName(ev.homeTeam);
-  c.awayN.textContent = teamName(ev.awayTeam);
   c.score.textContent = scoreText(ev);
   c.title.title = `${ev.homeTeam?.name} – ${ev.awayTeam?.name} · Tıkla: istatistikler · Basılı tut: sırala`;
   c.title.setAttribute('aria-label', `${ev.homeTeam?.name} – ${ev.awayTeam?.name} istatistiklerini aç`);
@@ -183,14 +250,27 @@ function updateCard(id) {
   c.targetBtn.classList.toggle('on', openForm?.matchId === id);
 
   const sport = matchSport(id);
+  const basket = sport === 'basketball';
   ensureRows(c, sport);
-  c.el.classList.toggle('basket', sport === 'basketball');
+  c.el.classList.toggle('basket', basket);
+  c.league.textContent = basket ? ev.tournament?.uniqueTournament?.name || ev.tournament?.name || '' : '';
+  if (basket) renderCardBoard(c, ev);
+  c.names = [nameForms(ev.homeTeam), nameForms(ev.awayTeam)];
+  const fitKey = [sport, c.names[0].short, c.names[1].short, c.score.textContent, basket ? '' : c.meta.textContent.length].join('|');
+  if (fitKey !== c.fitKey) {
+    c.fitKey = fitKey;
+    c.homeN.textContent = c.bHomeN.textContent = c.names[0].short;
+    c.awayN.textContent = c.bAwayN.textContent = c.names[1].short;
+    c.title.style.fontSize = '';
+    fitCardNames(c);
+  }
   const all = state.stats.get(id);
   const none = !!all?.none;
   const visible = new Set(cardStatsFor(sport));
-  c.statsBox.hidden = none || !visible.size;
-  c.none.hidden = !none;
-  if (!none) {
+  // Basketbol kartında takım istatistikleri yok: logolar, skor ve süre yeterli
+  c.statsBox.hidden = basket || none || !visible.size;
+  c.none.hidden = basket || !none;
+  if (!none && !basket) {
     const st = all?.[state.period];
     for (const metric of cardMetrics(sport)) {
       const selected = visible.has(metric.key);
@@ -201,6 +281,24 @@ function updateCard(id) {
     }
   }
   renderTargets(id, c.targets);
+}
+
+// Basketbol kartının skor paneli: logolar, büyük skor, çeyrek + süre, çeyrek skorları
+function renderCardBoard(c, ev) {
+  for (const [logo, team] of [[c.bHomeLogo, ev.homeTeam], [c.bAwayLogo, ev.awayTeam]]) {
+    const src = team?.id ? LOGO_URL(team.id) : null;
+    if (src && logo.getAttribute('src') !== src) { logo.hidden = false; logo.src = src; }
+    if (!src) logo.hidden = true;
+  }
+  c.bScore.textContent = scoreText(ev);
+  c.bClock.textContent = minuteText(ev);
+  c.bClock.classList.toggle('live', isLive(ev));
+  const quarters = [];
+  for (let n = 1; n <= 9 && ev.homeScore?.[`period${n}`] != null; n++) {
+    quarters.push(`${ev.homeScore[`period${n}`]}-${ev.awayScore?.[`period${n}`] ?? 0}`);
+  }
+  c.bQuarters.textContent = quarters.join('  ');
+  c.bQuarters.hidden = !quarters.length;
 }
 
 /* Kart sıralaması
@@ -351,7 +449,7 @@ function initCardSettings() {
     }
     pop.append(tabs);
     const heading = el('div', 'cfg-heading');
-    heading.append(el('strong', null, `${SPORTS[sport]} kartında göster`));
+    heading.append(el('strong', null, sport === 'basketball' ? 'Basketbol animasyon kutusunun altında (ilk 3)' : 'Futbol kartında göster'));
     const count = el('span', 'cfg-count', `${cardStatsFor(sport).length} seçili`);
     heading.append(count);
     pop.append(heading);

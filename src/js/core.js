@@ -9,7 +9,7 @@ const MOMENTUM_RELOAD_MS = 60_000;    // atak grafiği kendi kendine güncellenm
 const CATALOG_TTL_MS = 60_000;
 const MAX_ANIM = 12;
 const MAX_TOTAL = 30;
-const PARTITION = 'persist:sofa';     // ortak oturum: Sportradar dosyaları bir kez indirilip önbellekte kalır
+const PARTITION = 'persist:sofa'; // çalışan animasyon oturumu korunur; veri artık ayrı sofa-data oturumundadır
 const TRACKER_W = 620;                // animasyonun doğal boyutu (px)
 const TRACKER_H = 349;
 const MOMENTUM_W = 480;
@@ -83,7 +83,7 @@ const STAGE_CSS = `
 `;
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const api = (path) => window.sofa.get(path);
+const api = (path, options) => window.sofa.get(path, options);
 
 function load(key, fallback) {
   try {
@@ -102,6 +102,7 @@ const state = {
   stats: new Map(),                  // id -> { ALL: {...}, '1ST': {...}, '2ND': {...} } veya { none: true }
   statsRaw: new Map(),               // id -> Sofascore'un tüm maç istatistikleri
   lastPoll: new Map(),               // id -> son sorgu zamanı (ms)
+  lastAttempt: new Map(),            // failed/background requests also wait their turn
   tiles: new Map(),                  // id -> animasyon kutusu durumu
   period: 'ALL',
   replaceMatchId: null,
@@ -130,7 +131,8 @@ function loadMatches() {
   // Eski sürümden kalan liste: hepsi animasyonlu
   return load('selected', []).filter(Number.isInteger).map((id) => ({ id, anim: true }));
 }
-const saveMatches = () => save('matches', state.matches);
+const syncWatched = () => window.sofa.watch?.(state.matches.map((m) => m.id))?.catch(() => {});
+const saveMatches = () => { save('matches', state.matches); syncWatched(); };
 const saveTargets = () => save('targets', state.targets);
 const saveLayout = () => save('layout', state.layout);
 const findMatch = (id) => state.matches.find((m) => m.id === id);
