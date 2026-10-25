@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('appUpdate', {
   download: () => ipcRenderer.invoke('update:download'),
   install: () => ipcRenderer.invoke('update:install'),
   version: () => ipcRenderer.invoke('app:version'),
+  gate: () => ipcRenderer.invoke('app:gate'),
 });
 
 contextBridge.exposeInMainWorld('appNotify', {

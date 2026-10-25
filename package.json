@@ -1,7 +1,7 @@
 {
   "name": "mac-takip",
   "productName": "Mac Takip",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Sofascore canlı maç animasyonu ve şut takip paneli",
   "private": true,
   "license": "UNLICENSED",
@@ -78,7 +78,8 @@
         "repo": "mactakip",
         "releaseType": "release"
       }
-    ]
+    ],
+    "copyright": "© 2026 Eren Durmaz · simonpredicts.app · Tüm hakları saklıdır."
   },
   "devDependencies": {
     "electron": "^44.5.1",
@@ -86,5 +87,6 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
-  }
+  },
+  "author": "Eren Durmaz <erendurmaz_59@hotmail.com>"
 }

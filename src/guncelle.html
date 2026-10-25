@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Maç Takip © 2026 Eren Durmaz · simonpredicts.app · Tüm hakları saklıdır. -->
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Maç Takip · Güncelleme gerekli</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #090d12; color: #edf3f8; font-family: -apple-system, "Segoe UI", sans-serif; }
+  main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; box-sizing: border-box; }
+  h1 { font-size: 28px; margin: 0 0 12px; }
+  p { color: #9fb0c2; max-width: 520px; line-height: 1.5; margin: 0 0 24px; }
+  button { background: #f08a3c; color: #111; border: 0; border-radius: 12px; padding: 14px 28px; font-size: 17px; font-weight: 700; cursor: pointer; }
+  small { margin-top: 28px; color: #5d6b7a; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Yeni sürüm gerekli</h1>
+  <p id="mesaj">Kullandığın Maç Takip sürümü artık desteklenmiyor. Güncel ve resmî sürümü simonpredicts.app adresinden ücretsiz indirebilirsin.</p>
+  <button id="indir" type="button">Resmî siteden indir</button>
+  <small>Maç Takip · © 2026 Eren Durmaz · simonpredicts.app</small>
+</main>
+<script>
+  document.getElementById('indir').addEventListener('click', () => window.appUpdate?.download());
+  window.appUpdate?.gate?.().then((d) => { if (d && d.mesaj) document.getElementById('mesaj').textContent = d.mesaj; });
+</script>
+</body>
+</html>

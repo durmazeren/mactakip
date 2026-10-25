@@ -1,5 +1,9 @@
 # Maç Takip
 
+> **© 2026 Eren Durmaz · Tüm hakları saklıdır.** Bu depo yalnızca görüntülenmek üzere açıktır; kod lisanslı değildir.
+> İzinsiz kopyalama, yeniden adlandırma, dağıtma ve yayında kullanma yasaktır ([LICENSE](LICENSE)).
+> Resmî ve tek yetkili indirme adresi: **[simonpredicts.app](https://simonpredicts.app/mac-takip/)**
+
 Seçilen maçların Sofascore canlı animasyonunu tek ekranda ızgara halinde gösterir. Sağdaki "Şut ekranı" seçili maçların istatistiklerini gösterir; odaktaki maçlar daha sık, arka plandaki maçlar sırayla güncellenir. Mac ve Windows'ta aynı şekilde çalışır.
 
 ## İndir (önerilen)

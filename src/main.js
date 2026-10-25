@@ -1,3 +1,4 @@
+// Maç Takip © 2026 Eren Durmaz · simonpredicts.app · Tüm hakları saklıdır. İzinsiz kopyalama ve dağıtım yasaktır (LICENSE).
 const { app, BrowserWindow, ipcMain, net, shell, session, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +8,18 @@ const { createSofaDiagnostics } = require('./sofa-diagnostics');
 const { openRecoverySite } = require('./sofa-site-visit');
 const { createSofaPageReadiness } = require('./sofa-page-readiness');
 const { createBoxSources } = require('./box-sources');
+const { createAppGate } = require('./app-gate');
+
+// Eser kimliği: resmî sürümlerin imzası (Hakkında penceresinde ve günlükte görünür).
+const ESER = 'Maç Takip · © 2026 Eren Durmaz · simonpredicts.app · eser-kimligi MT-ED-20261002';
+const GATE_URL = 'https://simonpredicts.app/api/app/gate/';
+// Resmî derleme anahtarı: yalnız resmî yayın akışında (CI sırrı) pakete eklenir, kaynak kodda yoktur.
+const BUILD_KEY = String(require('../package.json').buildKey || '');
+const RESMI_INDIR = 'https://simonpredicts.app/mac-takip/';
+let gate = null;
+const kapali = () => gate && !gate.state().izin;
+const KAPALI_HATA = { message: 'Bu Maç Takip sürümü artık desteklenmiyor. Güncel sürümü simonpredicts.app adresinden indir.',
+  code: 'GUNCELLEME_GEREKLI' };
 
 const REPO = 'durmazeren/mactakip';
 const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000;
@@ -82,6 +95,7 @@ function createWindow() {
 
 // Veri ve bağlantı kontrol sayfası aynı oturumda; animasyonlar ayrı çerez deposunda.
 ipcMain.handle('sofa:get', async (_e, apiPath, options) => {
+  if (kapali()) return { ok: false, error: KAPALI_HATA };
   try { return { ok: true, data: await sofaClient.get(apiPath, options) }; }
   catch (err) { return { ok: false, error: { message: err.message, code: err.code,
     status: err.status, retryAt: err.retryAt } }; }
@@ -92,7 +106,7 @@ const boxSources = createBoxSources({ fetchJson: async (url, headers) => {
   if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
   return res.json();
 } });
-ipcMain.handle('box:players', (_e, query) => boxSources.players(query).catch(() => null));
+ipcMain.handle('box:players', (_e, query) => (kapali() ? null : boxSources.players(query).catch(() => null)));
 ipcMain.handle('sofa:state', sofaState);
 ipcMain.handle('sofa:watch', (_e, ids) => {
   watchedIds = Array.isArray(ids) ? [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 30) : [];
@@ -184,6 +198,7 @@ function setupUpdater() {
 }
 
 ipcMain.handle('update:download', async () => {
+  if (kapali()) { shell.openExternal(gate.state().indir || RESMI_INDIR); return; }
   if (manualUrl) { shell.openExternal(manualUrl); return; }
   if (updater) await updater.downloadUpdate();
 });
@@ -191,6 +206,16 @@ ipcMain.handle('update:install', () => {
   if (updater) updater.quitAndInstall();
 });
 ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('app:gate', () => (gate ? gate.state() : { izin: true }));
+
+// Sürüm kapısı: resmî sunucu bu sürümü desteklemiyorsa veri kesilir, pencerede güncelleme sayfası açılır.
+async function kapiKontrol() {
+  if (!gate) return;
+  const d = await gate.check();
+  if (!d.izin && win && !win.isDestroyed() && !win.webContents.getURL().endsWith('guncelle.html')) {
+    win.loadFile(path.join(__dirname, 'guncelle.html'));
+  }
+}
 
 // Masaüstü bildirimi (gol, kırmızı kart, hedef sonucu). Ses uygulamanın kendi ayarından çalınır; sistem sesi kapalı.
 // Tıklanınca pencere öne gelir ve ilgili maç gösterilir.
@@ -244,6 +269,19 @@ ipcMain.handle('notify', (_e, payload) => {
 });
 
 app.whenReady().then(() => {
+  app.setAboutPanelOptions({ applicationName: 'Maç Takip', applicationVersion: app.getVersion(), copyright: ESER });
+  console.log(ESER);
+  const gateFile = path.join(app.getPath('userData'), 'app-gate.json');
+  gate = app.isPackaged ? createAppGate({
+    version: app.getVersion(), url: GATE_URL, indir: RESMI_INDIR, key: BUILD_KEY,
+    fetchJson: async (u) => {
+      const res = await net.fetch(u, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    readCache: () => { try { return JSON.parse(fs.readFileSync(gateFile, 'utf8')); } catch { return null; } },
+    writeCache: (v) => { try { fs.writeFileSync(gateFile, JSON.stringify(v), { mode: 0o600 }); } catch { /* yazılamazsa önbelleksiz devam */ } },
+  }) : null;
   if (!primaryInstance) return;
   if (process.platform === 'win32') app.setAppUserModelId('com.mactakip.app'); // Windows bildirimleri için
   const sofaSession = session.fromPartition(SOFA_PARTITION);
@@ -288,6 +326,8 @@ app.whenReady().then(() => {
   setupUpdater();
   win.webContents.once('did-finish-load', () => setTimeout(checkForUpdates, 5000));
   setInterval(checkForUpdates, UPDATE_CHECK_MS);
+  kapiKontrol();
+  setInterval(kapiKontrol, UPDATE_CHECK_MS);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
