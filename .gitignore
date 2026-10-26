@@ -10,3 +10,4 @@ docs/
 tools/
 _to_delete/
 sofa-debug.log
+.paket/

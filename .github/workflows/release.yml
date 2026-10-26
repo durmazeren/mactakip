@@ -66,7 +66,7 @@ jobs:
         shell: bash
         env:
           MT_BUILD_KEY: ${{ secrets.MT_BUILD_KEY }}
-        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.buildKey="$MT_BUILD_KEY"
+        run: node scripts/paketle.mjs ${{ matrix.target }} --publish never -c.extraMetadata.buildKey="$MT_BUILD_KEY"
       # Mac: sertifika + notarize sırları varsa Developer ID ile imzalanır, Apple'a
       # onaylatılır ve uygulama içi tek tıkla güncelleme açılır (macAutoUpdate).
       # Sırlar yoksa ya da eksikse bugünkü gibi imzasız derlenir; yayın durmaz.
@@ -99,14 +99,14 @@ jobs:
           fi
           if [ "$signed" = true ]; then
             export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
-            npx electron-builder --mac --publish never -c.extraMetadata.macAutoUpdate=true -c.extraMetadata.buildKey="$MT_BUILD_KEY"
+            node scripts/paketle.mjs --mac --publish never -c.extraMetadata.macAutoUpdate=true -c.extraMetadata.buildKey="$MT_BUILD_KEY"
             for app in dist/mac*/*.app; do
               codesign --verify --deep --strict --verbose=2 "$app"
               xcrun stapler validate "$app"
             done
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
-            npx electron-builder --mac --publish never -c.extraMetadata.buildKey="$MT_BUILD_KEY"
+            node scripts/paketle.mjs --mac --publish never -c.extraMetadata.buildKey="$MT_BUILD_KEY"
           fi
           mkdir -p meta && echo "$signed" > meta/mac-signed
       - if: runner.os == 'macOS'

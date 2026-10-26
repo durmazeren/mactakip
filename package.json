@@ -79,11 +79,19 @@
         "releaseType": "release"
       }
     ],
-    "copyright": "© 2026 Eren Durmaz · simonpredicts.app · Tüm hakları saklıdır."
+    "copyright": "© 2026 Eren Durmaz · simonpredicts.app · Tüm hakları saklıdır.",
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    }
   },
   "devDependencies": {
     "electron": "^44.5.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "javascript-obfuscator": "^4.1.1"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
