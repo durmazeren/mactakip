@@ -62,6 +62,7 @@ function kopyalaDuz(src, dst) {
 }
 
 console.log('[paketle] electron-builder çalışıyor…', builderArgs.join(' '));
-execFileSync('npx', ['electron-builder', ...builderArgs, '-c.directories.output', path.join(kok, 'dist')],
-  { cwd: paket, stdio: 'inherit', env: process.env });
+// npx yerine electron-builder'ın kendi CLI dosyası node ile çalıştırılır: Windows'ta kabuksuz `npx` bulunamıyordu.
+execFileSync(process.execPath, [path.join(kok, 'node_modules', 'electron-builder', 'cli.js'), ...builderArgs,
+  '-c.directories.output', path.join(kok, 'dist')], { cwd: paket, stdio: 'inherit', env: process.env });
 console.log('[paketle] bitti.');

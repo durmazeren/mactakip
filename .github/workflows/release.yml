@@ -106,7 +106,8 @@ jobs:
             done
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
-            node scripts/paketle.mjs --mac --publish never -c.extraMetadata.buildKey="$MT_BUILD_KEY"
+            # Paket bütünlüğü (fuses) ikili dosyayı değiştirir; imzasız sürümde ad-hoc imza şart, yoksa macOS uygulamayı açmaz.
+            node scripts/paketle.mjs --mac --publish never -c.mac.identity=- -c.extraMetadata.buildKey="$MT_BUILD_KEY"
           fi
           mkdir -p meta && echo "$signed" > meta/mac-signed
       - if: runner.os == 'macOS'
